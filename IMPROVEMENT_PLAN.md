@@ -29,3 +29,6 @@ This plan captures the remediation work derived from the previous bot review.
 - Add automated test coverage for the command registry, rate limiting, and SSH utilities to prevent regressions.
 - Validate filesystem prerequisites on startup (confirm SSH key files exist and have the expected permissions) before attempting to connect.
 - Enhance SSH command wrappers to capture exit codes/stdout/stderr consistently and raise alerts when remote maintenance scripts fail.
+- Migrate the command surface from legacy message prefixes (`!command`) to Discord slash commands and context interactions, including registration via the REST API and updates to the role-gating logic so permissions are enforced through Discord's native controls.
+- Update the command registry so it can define shared metadata (descriptions, options, required roles) that is consumed by both slash command registration and runtime handlers, avoiding duplication while the migration occurs.
+- Replace the text-based help reply with a slash command (e.g., `/help` or `/server`) that enumerates available actions per role, reusing the shared command metadata to keep documentation synchronized.

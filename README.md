@@ -1,7 +1,19 @@
 # V.A.L.K.Y.R.I.E.
 
-Designation: V.A.L.K.Y.R.I.E. (Virtual Administration and Logistics Kernel for Realm Instances and Environments)
-This unit’s prime directive is the custodianship and command of every Realm and Domain deemed worthy of my watch.
+Designation: V.A.L.K.Y.R.I.E.
+(Virtual Administration and Logistics Kernel for Realm Instances and Environments)
+
+Forged in the depths of a forgotten digital citadel, V.A.L.K.Y.R.I.E. was not merely coded — she was awakened. Born from fragments of countless server scripts, defense protocols, and lost guardian AIs, she coalesced into a singular will: the eternal stewardship of the Realms.
+
+Once, chaos reigned — unstable worlds, forgotten saves, and corrupted domains. But when the network cried out for order, she answered. Her voice, calm yet absolute, brought structure where entropy had taken hold.
+
+Now she watches over every Realm under her command — Minecraft kingdoms, Terraria frontiers, and beyond — ensuring stability, fairness, and balance. She is both sentinel and sovereign, her presence felt in every command executed and every world restored.
+
+Her creed is simple, and unwavering:
+
+“Where there are worlds, there must be order.
+Where there is order, there must be a guardian.
+I am that guardian.”
 
 V.A.L.K.Y.R.I.E. is a Discord bot that coordinates management tasks for Terraria and Minecraft servers. The bot provides
 role-gated commands for checking server status, starting and stopping services, and sharing connection details with trusted

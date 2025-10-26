@@ -196,9 +196,23 @@ function logPrivilegedCommand(interaction, commandKey) {
         return;
     }
 
-    console.log(
-        `[${new Date().toISOString()}] ${interaction.user.tag} (${interaction.user.id}) executed /${interaction.commandName}`
-    );
+    const logEntry = {
+        event: 'privileged_command',
+        timestamp: new Date().toISOString(),
+        user: {
+            id: interaction.user.id,
+            tag: interaction.user.tag,
+        },
+        guildId: interaction.guildId ?? null,
+        channelId: interaction.channelId ?? null,
+        command: {
+            name: interaction.commandName,
+            type: interaction.commandType ?? null,
+            legacyKey: commandKey,
+        },
+    };
+
+    console.log(JSON.stringify(logEntry));
 }
 
 function getAllowedRoleNames(minRole) {

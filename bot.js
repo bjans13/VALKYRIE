@@ -8,6 +8,7 @@ const {
     ApplicationCommandType,
 } = require('discord.js');
 const net = require('net');
+const fs = require('fs');
 const { setTimeout: delay } = require('timers/promises');
 const { withSSHConnection, runSSHCommand } = require('./utils/sshHandler');
 require('dotenv').config();
@@ -56,6 +57,11 @@ const config = {
 if (Number.isNaN(config.terraria.port) || Number.isNaN(config.minecraft.port)) {
     throw new Error('TERRARIA_PORT and MINECRAFT_PORT must be valid numbers.');
 }
+
+validateFilesystemPrerequisites([
+    { name: 'Terraria', keyPath: config.terraria.privateKeyPath },
+    { name: 'Minecraft', keyPath: config.minecraft.privateKeyPath },
+]);
 
 const ROLE_PRIORITY = ['Friends', 'Crows', 'Server Mgt'];
 const SENSITIVE_COMMANDS = new Set([
@@ -874,3 +880,33 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(config.discordToken);
+
+function validateFilesystemPrerequisites(services) {
+    for (const { name, keyPath } of services) {
+        try {
+            const stats = fs.statSync(keyPath);
+            if (!stats.isFile()) {
+                throw new Error(`[${name}] private key path ${keyPath} is not a file.`);
+            }
+
+            fs.accessSync(keyPath, fs.constants.R_OK);
+
+            if (process.platform !== 'win32') {
+                const mode = stats.mode & 0o777;
+                if ((mode & 0o077) !== 0) {
+                    throw new Error(
+                        `[${name}] private key ${keyPath} must not be accessible to group or others. Run chmod 600.`
+                    );
+                }
+            }
+        } catch (error) {
+            if (error.code === 'ENOENT') {
+                throw new Error(`[${name}] private key file not found at ${keyPath}.`);
+            }
+
+            throw new Error(
+                `[${name}] private key validation failed for ${keyPath}: ${error.message || error.toString()}`
+            );
+        }
+    }
+}

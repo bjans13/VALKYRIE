@@ -3,17 +3,21 @@ const {
     GatewayIntentBits,
     REST,
     Routes,
+    SlashCommandBuilder,
+    ContextMenuCommandBuilder,
     ApplicationCommandOptionType,
-    ApplicationCommandPermissionType,
     ApplicationCommandType,
 } = require('discord.js');
 const net = require('net');
+const fs = require('fs');
 const { setTimeout: delay } = require('timers/promises');
 const { withSSHConnection, runSSHCommand } = require('./utils/sshHandler');
 require('dotenv').config();
 
 const REQUIRED_ENV_VARS = [
     'DISCORD_TOKEN',
+    'ALLOWED_GUILDS',
+    'OWNER',
     'TERRARIA_GAME_SERVER_IP',
     'TERRARIA_SSH_USER',
     'TERRARIA_SSH_PRIVATE_KEY_PATH',
@@ -33,8 +37,30 @@ if (missingEnv.length > 0) {
     throw new Error(`Missing required environment variables: ${missingEnv.join(', ')}`);
 }
 
+const allowedGuilds = (process.env.ALLOWED_GUILDS || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+if (allowedGuilds.length === 0) {
+    throw new Error('ALLOWED_GUILDS must specify at least one guild ID.');
+}
+
+for (const guildId of allowedGuilds) {
+    if (!/^\d+$/.test(guildId)) {
+        throw new Error(`Invalid guild ID in ALLOWED_GUILDS: ${guildId}`);
+    }
+}
+
+const ownerId = process.env.OWNER.trim();
+if (!/^\d+$/.test(ownerId)) {
+    throw new Error('OWNER must be set to a numeric Discord user ID.');
+}
+
 const config = {
     discordToken: process.env.DISCORD_TOKEN,
+    allowedGuilds,
+    ownerId,
     terraria: {
         host: process.env.TERRARIA_GAME_SERVER_IP,
         username: process.env.TERRARIA_SSH_USER,
@@ -55,6 +81,59 @@ const config = {
 
 if (Number.isNaN(config.terraria.port) || Number.isNaN(config.minecraft.port)) {
     throw new Error('TERRARIA_PORT and MINECRAFT_PORT must be valid numbers.');
+}
+
+validateFilesystemPrerequisites([
+    { name: 'Terraria', keyPath: config.terraria.privateKeyPath },
+    { name: 'Minecraft', keyPath: config.minecraft.privateKeyPath },
+]);
+
+let ownerUser = null;
+const unauthorizedGuildNotices = new Set();
+
+function isAllowedGuild(guildId) {
+    return Boolean(guildId && config.allowedGuilds.includes(guildId));
+}
+
+async function getOwnerUser(clientInstance) {
+    if (!config.ownerId) {
+        return null;
+    }
+
+    if (ownerUser && ownerUser.id === config.ownerId) {
+        return ownerUser;
+    }
+
+    try {
+        ownerUser = await clientInstance.users.fetch(config.ownerId);
+        return ownerUser;
+    } catch (error) {
+        console.error('Failed to fetch owner user for alerts:', error);
+        return null;
+    }
+}
+
+async function alertOwner(clientInstance, message) {
+    const owner = await getOwnerUser(clientInstance);
+    if (!owner) {
+        return;
+    }
+
+    try {
+        await owner.send(message);
+    } catch (error) {
+        console.error('Failed to send alert to owner:', error);
+    }
+}
+
+async function reportUnauthorizedGuild(clientInstance, guildId, context, guildName = 'Unknown') {
+    const label = guildId ? `${guildName} (${guildId})` : guildName;
+    console.warn(`[SECURITY] ${context}: unauthorized guild ${label}.`);
+
+    if (guildId && !unauthorizedGuildNotices.has(guildId)) {
+        unauthorizedGuildNotices.add(guildId);
+        await alertOwner(clientInstance, `[SECURITY] ${context}: unauthorized guild ${label}.`);
+    }
 }
 
 const ROLE_PRIORITY = ['Friends', 'Crows', 'Server Mgt'];
@@ -85,9 +164,26 @@ const client = new Client({
 client.once('ready', async () => {
     console.log(`Bot connected as ${client.user.tag}`);
     try {
+        await getOwnerUser(client);
+    } catch (error) {
+        console.error('Unable to resolve owner user during startup:', error);
+    }
+
+    try {
         await registerSlashCommands(client);
     } catch (error) {
         console.error('Failed to register slash commands via REST:', error);
+    }
+
+    for (const guild of client.guilds.cache.values()) {
+        if (!isAllowedGuild(guild.id)) {
+            await reportUnauthorizedGuild(
+                client,
+                guild.id,
+                'Detected on startup',
+                guild.name ?? 'Unknown'
+            );
+        }
     }
 });
 
@@ -196,17 +292,23 @@ function logPrivilegedCommand(interaction, commandKey) {
         return;
     }
 
-    console.log(
-        `[${new Date().toISOString()}] ${interaction.user.tag} (${interaction.user.id}) executed /${interaction.commandName}`
-    );
-}
+    const logEntry = {
+        event: 'privileged_command',
+        timestamp: new Date().toISOString(),
+        user: {
+            id: interaction.user.id,
+            tag: interaction.user.tag,
+        },
+        guildId: interaction.guildId ?? null,
+        channelId: interaction.channelId ?? null,
+        command: {
+            name: interaction.commandName,
+            type: interaction.commandType ?? null,
+            legacyKey: commandKey,
+        },
+    };
 
-function getAllowedRoleNames(minRole) {
-    if (minRole <= 0) {
-        return [];
-    }
-
-    return ROLE_PRIORITY.slice(minRole - 1);
+    console.log(JSON.stringify(logEntry));
 }
 
 function getCommandKey(name, type = ApplicationCommandType.ChatInput) {
@@ -215,6 +317,50 @@ function getCommandKey(name, type = ApplicationCommandType.ChatInput) {
 
 const commandDefinitions = [];
 const commandRegistry = new Map();
+
+function applyDefaultPermissions(builder, command) {
+    const permissionValue = command.defaultMemberPermissions ?? null;
+    return builder.setDefaultMemberPermissions(permissionValue);
+}
+
+function createCommandBuilder(command) {
+    if (command.type === ApplicationCommandType.ChatInput) {
+        const builder = new SlashCommandBuilder()
+            .setName(command.name)
+            .setDescription(command.description)
+            .setDMPermission(false);
+
+        for (const option of command.options) {
+            if (option.type === ApplicationCommandOptionType.String) {
+                builder.addStringOption((opt) =>
+                    opt
+                        .setName(option.name)
+                        .setDescription(option.description)
+                        .setRequired(Boolean(option.required))
+                );
+                continue;
+            }
+
+            throw new Error(`Unsupported option type for ${command.name}: ${option.type}`);
+        }
+
+        return applyDefaultPermissions(builder, command);
+    }
+
+    if (
+        command.type === ApplicationCommandType.User ||
+        command.type === ApplicationCommandType.Message
+    ) {
+        const builder = new ContextMenuCommandBuilder()
+            .setName(command.name)
+            .setType(command.type)
+            .setDMPermission(false);
+
+        return applyDefaultPermissions(builder, command);
+    }
+
+    return null;
+}
 
 function registerCommand(definition) {
     const normalized = {
@@ -225,6 +371,8 @@ function registerCommand(definition) {
         usage: definition.usage ?? definition.name,
         category: definition.category ?? 'General',
     };
+
+    normalized.builder = createCommandBuilder(normalized);
 
     const key = getCommandKey(normalized.name, normalized.type);
     commandDefinitions.push(normalized);
@@ -740,78 +888,46 @@ registerCommand({
 async function registerSlashCommands(clientInstance) {
     const rest = new REST({ version: '10' }).setToken(config.discordToken);
 
-    const body = commandDefinitions.map((command) => {
-        const base = {
-            name: command.name,
-            type: command.type,
-            dm_permission: false,
-        };
-
-        if (command.type === ApplicationCommandType.ChatInput) {
-            base.description = command.description;
-            base.options = command.options;
-        }
-
-        const allowedRoles = getAllowedRoleNames(command.minRole);
-        base.default_member_permissions = allowedRoles.length > 0 ? '0' : null;
-
-        return base;
-    });
+    const body = commandDefinitions
+        .map((command) => command.builder)
+        .filter(Boolean)
+        .map((builder) => builder.toJSON());
 
     const guilds = clientInstance.guilds.cache;
     for (const guild of guilds.values()) {
+        if (!isAllowedGuild(guild.id)) {
+            await reportUnauthorizedGuild(
+                clientInstance,
+                guild.id,
+                'Skipped command registration',
+                guild.name ?? 'Unknown'
+            );
+            continue;
+        }
+
         try {
-            const registeredCommands = await rest.put(
+            await rest.put(
                 Routes.applicationGuildCommands(clientInstance.user.id, guild.id),
                 { body }
             );
-            await applyRolePermissions(guild, registeredCommands);
         } catch (error) {
             console.error(`Failed to register commands for guild ${guild.id}:`, error);
         }
     }
 }
 
-async function applyRolePermissions(guild, registeredCommands) {
-    await guild.roles.fetch();
-
-    for (const apiCommand of registeredCommands) {
-        const key = getCommandKey(apiCommand.name, apiCommand.type);
-        const metadata = commandRegistry.get(key);
-        if (!metadata) {
-            continue;
-        }
-
-        const allowedRoleNames = getAllowedRoleNames(metadata.minRole);
-        if (allowedRoleNames.length === 0) {
-            continue;
-        }
-
-        const resolvedRoles = allowedRoleNames
-            .map((roleName) => guild.roles.cache.find((role) => role.name === roleName))
-            .filter(Boolean);
-
-        if (resolvedRoles.length === 0) {
-            console.warn(`No matching roles found for command ${apiCommand.name} in guild ${guild.name}.`);
-            continue;
-        }
-
-        const permissions = resolvedRoles.map((role) => ({
-            id: role.id,
-            type: ApplicationCommandPermissionType.Role,
-            permission: true,
-        }));
-
-        try {
-            await guild.commands.permissions.set({
-                command: apiCommand.id,
-                permissions,
-            });
-        } catch (error) {
-            console.error(`Failed to set permissions for command ${apiCommand.name} in guild ${guild.name}:`, error);
-        }
+client.on('guildCreate', async (guild) => {
+    if (isAllowedGuild(guild.id)) {
+        return;
     }
-}
+
+    await reportUnauthorizedGuild(
+        client,
+        guild.id,
+        'Joined unauthorized guild',
+        guild.name ?? 'Unknown'
+    );
+});
 
 client.on('interactionCreate', async (interaction) => {
     if (
@@ -819,6 +935,17 @@ client.on('interactionCreate', async (interaction) => {
         !interaction.isUserContextMenuCommand() &&
         !interaction.isMessageContextMenuCommand()
     ) {
+        return;
+    }
+
+    const guildId = interaction.guildId ?? null;
+    if (!isAllowedGuild(guildId)) {
+        await reportUnauthorizedGuild(
+            client,
+            guildId,
+            'Blocked interaction',
+            interaction.guild?.name ?? 'Unknown'
+        );
         return;
     }
 
@@ -833,6 +960,20 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
         return;
+    }
+
+    if (command.minRole > 0) {
+        const member = interaction.member ?? null;
+        const roleLevel = getMemberRoleLevel(member);
+        if (roleLevel < command.minRole) {
+            const requiredRoleName = ROLE_PRIORITY[command.minRole - 1] ?? 'required';
+            await respond(
+                interaction,
+                `You must hold the ${requiredRoleName} role or higher to use this command.`,
+                { ephemeral: true }
+            );
+            return;
+        }
     }
 
     if (checkRateLimit(interaction.user.id, command.legacyKey)) {
@@ -860,3 +1001,33 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(config.discordToken);
+
+function validateFilesystemPrerequisites(services) {
+    for (const { name, keyPath } of services) {
+        try {
+            const stats = fs.statSync(keyPath);
+            if (!stats.isFile()) {
+                throw new Error(`[${name}] private key path ${keyPath} is not a file.`);
+            }
+
+            fs.accessSync(keyPath, fs.constants.R_OK);
+
+            if (process.platform !== 'win32') {
+                const mode = stats.mode & 0o777;
+                if ((mode & 0o077) !== 0) {
+                    throw new Error(
+                        `[${name}] private key ${keyPath} must not be accessible to group or others. Run chmod 600.`
+                    );
+                }
+            }
+        } catch (error) {
+            if (error.code === 'ENOENT') {
+                throw new Error(`[${name}] private key file not found at ${keyPath}.`);
+            }
+
+            throw new Error(
+                `[${name}] private key validation failed for ${keyPath}: ${error.message || error.toString()}`
+            );
+        }
+    }
+}

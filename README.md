@@ -32,6 +32,8 @@ Create a `.env` file in the project root with the following variables:
 | Variable | Description |
 | --- | --- |
 | `DISCORD_TOKEN` | Discord bot token. |
+| `ALLOWED_GUILDS` | Comma-separated list of Discord guild IDs the bot is authorized to operate in. |
+| `OWNER` | Discord user ID that should receive security alerts. |
 | `TERRARIA_GAME_SERVER_IP` | Internal IP address used for SSH connections to the Terraria host. |
 | `TERRARIA_SSH_USER` | SSH username for the Terraria host. |
 | `TERRARIA_SSH_PRIVATE_KEY_PATH` | Absolute path to the private key used to authenticate against the Terraria host. |

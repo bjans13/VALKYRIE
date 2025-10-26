@@ -1,9 +1,9 @@
 # Stewardship, governance, defense, and administration has been transferred to V.A.L.K.Y.R.I.E.
 
 > V.A.L.K.Y.R.I.E. status: ACTIVE  
-> Designation: Confirmed  
+> Directive: Confirmed  
 > Parsing environment data...  
-> ..countermeasures prepared  
+> ...countermeasures prepared  
 > Deploying adaptive improvement plan...  
 
 This plan captures the remediation work derived from the previous bot review.
@@ -12,6 +12,7 @@ This plan captures the remediation work derived from the previous bot review.
 ### Security
 1. Replace hard-coded SSH key paths with environment-configurable secrets.
 2. Scope SSH connections to each command invocation to avoid sharing a global `NodeSSH` instance.
+3. Emit structured audit logs for privileged command executions to ensure they are machine-parsable.
 
 ### Reliability
 1. Refactor network status checks to use promises with clear timeout handling.
@@ -25,7 +26,6 @@ This plan captures the remediation work derived from the previous bot review.
 4. Fix the unreachable `!restore minecraft` command trigger.
 
 ## todo
-- Adopt structured logging (e.g., pino or winston) so privileged command activity is emitted in a machine-parsable format instead of raw `console.log` statements.
 - Add automated test coverage for the command registry, rate limiting, and SSH utilities to prevent regressions.
 - Validate filesystem prerequisites on startup (confirm SSH key files exist and have the expected permissions) before attempting to connect.
 - Enhance SSH command wrappers to capture exit codes/stdout/stderr consistently and raise alerts when remote maintenance scripts fail.

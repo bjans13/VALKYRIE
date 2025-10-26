@@ -1,4 +1,12 @@
-const { Client, GatewayIntentBits } = require('discord.js');
+const {
+    Client,
+    GatewayIntentBits,
+    REST,
+    Routes,
+    ApplicationCommandOptionType,
+    ApplicationCommandPermissionType,
+    ApplicationCommandType,
+} = require('discord.js');
 const net = require('net');
 const { setTimeout: delay } = require('timers/promises');
 const { withSSHConnection, runSSHCommand } = require('./utils/sshHandler');
@@ -49,7 +57,6 @@ if (Number.isNaN(config.terraria.port) || Number.isNaN(config.minecraft.port)) {
     throw new Error('TERRARIA_PORT and MINECRAFT_PORT must be valid numbers.');
 }
 
-const COMMAND_PREFIX = '!';
 const ROLE_PRIORITY = ['Friends', 'Crows', 'Server Mgt'];
 const SENSITIVE_COMMANDS = new Set([
     'start terraria',
@@ -75,12 +82,17 @@ const client = new Client({
     ],
 });
 
-client.once('ready', () => {
+client.once('ready', async () => {
     console.log(`Bot connected as ${client.user.tag}`);
+    try {
+        await registerSlashCommands(client);
+    } catch (error) {
+        console.error('Failed to register slash commands via REST:', error);
+    }
 });
 
 function checkRateLimit(userId, commandKey) {
-    if (!SENSITIVE_COMMANDS.has(commandKey)) {
+    if (!commandKey || !SENSITIVE_COMMANDS.has(commandKey)) {
         return false;
     }
 
@@ -97,14 +109,31 @@ function checkRateLimit(userId, commandKey) {
     return false;
 }
 
-async function sendDirectMessage(message, content) {
+async function respond(interaction, content, options = {}) {
+    if (typeof content === 'object' && content !== null) {
+        if (interaction.deferred || interaction.replied) {
+            return interaction.followUp(content);
+        }
+        return interaction.reply(content);
+    }
+
+    const payload = { content, ...options };
+    if (interaction.deferred || interaction.replied) {
+        return interaction.followUp(payload);
+    }
+    return interaction.reply(payload);
+}
+
+async function sendDirectMessageWithNotice(interaction, content) {
     try {
-        await message.author.send(content);
-        await message.channel.send('I sent you a DM with the requested information.');
+        await interaction.user.send(content);
+        await respond(interaction, 'I sent you a DM with the requested information.', { ephemeral: true });
     } catch (error) {
-        console.warn(`Failed to DM ${message.author.tag}:`, error.message);
-        await message.channel.send(
-            'I could not send you a DM. Please make sure your privacy settings allow messages from server members.'
+        console.warn(`Failed to DM ${interaction.user.tag}:`, error.message);
+        await respond(
+            interaction,
+            'I could not send you a DM. Please make sure your privacy settings allow messages from server members.',
+            { ephemeral: true }
         );
     }
 }
@@ -144,15 +173,17 @@ async function isServerOnline(host, port, timeout = 5000) {
     });
 }
 
-function getUserRoleLevel(message) {
-    if (!message.guild || !message.member || !message.member.roles) {
+function getMemberRoleLevel(member) {
+    if (!member || !member.roles) {
         return 0;
     }
 
+    const roleCache = member.roles.cache ?? new Map();
+
     for (let i = ROLE_PRIORITY.length - 1; i >= 0; i -= 1) {
         const roleName = ROLE_PRIORITY[i];
-        const role = message.guild.roles.cache.find((r) => r.name === roleName);
-        if (role && message.member.roles.cache.has(role.id)) {
+        const role = roleCache.find((r) => r.name === roleName);
+        if (role) {
             return i + 1;
         }
     }
@@ -160,105 +191,58 @@ function getUserRoleLevel(message) {
     return 0;
 }
 
-function logPrivilegedCommand(message, commandKey) {
-    if (!SENSITIVE_COMMANDS.has(commandKey)) {
+function logPrivilegedCommand(interaction, commandKey) {
+    if (!commandKey || !SENSITIVE_COMMANDS.has(commandKey)) {
         return;
     }
 
     console.log(
-        `[${new Date().toISOString()}] ${message.author.tag} (${message.author.id}) executed ${COMMAND_PREFIX}${commandKey}`
+        `[${new Date().toISOString()}] ${interaction.user.tag} (${interaction.user.id}) executed /${interaction.commandName}`
     );
 }
 
-async function handleHelp(message, roleLevel) {
-    if (roleLevel === 0) {
-        await message.reply('You do not have the required permissions to use bot commands.');
-        return;
+function getAllowedRoleNames(minRole) {
+    if (minRole <= 0) {
+        return [];
     }
 
-    if (roleLevel === 1) {
-        await message.channel.send(
-            `Hello! Here are the commands you can use:
-
-Terraria:
-!status terraria - Checks if the Terraria server is online.
-
-Minecraft:
-!status minecraft - Checks if the Minecraft server is online.
-
-Help:
-!serverhelp - Shows this help message.
-!Phineashelp - Shows this help message.
-
-Please reach out if you need additional permissions.`
-        );
-        return;
-    }
-
-    if (roleLevel === 2) {
-        await message.channel.send(
-            `Hello! Here are the commands you can use:
-
-Terraria:
-!status terraria - Checks if the Terraria server is online.
-!player list - Lists the currently connected players.
-!announce <message> - Sends an announcement to players currently online in Terraria.
-!join terrariaserver - Provides instructions on how to connect to the Terraria server.
-
-Minecraft:
-!join minecraftserver - Provides instructions on how to connect to the Minecraft server.
-!status minecraft - Checks if the Minecraft server is online.
-
-Help:
-!serverhelp - Shows this help message.
-!Phineashelp - Shows this help message.`
-        );
-        return;
-    }
-
-    await message.channel.send(
-        `Hello! Here are the commands you can use:
-
-Terraria:
-!join terrariaserver - Provides connection instructions.
-!status terraria - Checks if the Terraria server is online.
-!start terraria - Starts the Terraria server.
-!stop terraria - Stops the Terraria server.
-!restart terraria - Restarts the Terraria server.
-!player list - Lists the currently connected players.
-!uptime terraria - Shows the server uptime.
-!stop terraria warning - Gracefully stops the server with a warning to players.
-!announce <message> - Sends an announcement to players currently online.
-
-Minecraft:
-!join minecraftserver - Provides connection instructions.
-!status minecraft - Checks if the Minecraft server is online.
-!start minecraft - Starts the Minecraft server.
-!stop minecraft - Stops the Minecraft server.
-!restart minecraft - Restarts the Minecraft server.
-!backup minecraft - Backs up the Minecraft server.
-!update minecraft - Updates the Minecraft server.
-!restore minecraft - Restores the Minecraft server from backup.
-!set minecraftpatch <patch> - Sets the Bedrock download link.
-
-Help:
-!serverhelp - Shows this help message.
-!Phineashelp - Shows this help message.`
-    );
+    return ROLE_PRIORITY.slice(minRole - 1);
 }
 
+function getCommandKey(name, type = ApplicationCommandType.ChatInput) {
+    return `${type}:${name}`;
+}
+
+const commandDefinitions = [];
 const commandRegistry = new Map();
 
-function registerCommand(trigger, options) {
-    commandRegistry.set(trigger.toLowerCase(), options);
+function registerCommand(definition) {
+    const normalized = {
+        ...definition,
+        type: definition.type ?? ApplicationCommandType.ChatInput,
+        options: definition.options ?? [],
+        minRole: definition.minRole ?? 0,
+        usage: definition.usage ?? definition.name,
+        category: definition.category ?? 'General',
+    };
+
+    const key = getCommandKey(normalized.name, normalized.type);
+    commandDefinitions.push(normalized);
+    commandRegistry.set(key, normalized);
 }
 
-registerCommand('status terraria', {
+registerCommand({
+    name: 'status_terraria',
+    usage: 'status_terraria',
+    legacyKey: 'status terraria',
+    description: 'Check if the Terraria server is online and connectable.',
+    category: 'Terraria',
     minRole: 1,
-    handler: async (message) => {
-        await message.channel.send('Checking Terraria server status...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Checking Terraria server status...');
         const online = await isServerOnline(config.terraria.host, config.terraria.port);
-        await message.channel.send(
+        await respond(
+            interaction,
             online
                 ? 'Terraria server is currently online and connectable!'
                 : 'Terraria server is currently offline.'
@@ -266,10 +250,15 @@ registerCommand('status terraria', {
     },
 });
 
-registerCommand('player list', {
+registerCommand({
+    name: 'player_list',
+    usage: 'player_list',
+    legacyKey: 'player list',
+    description: 'List the currently connected Terraria players.',
+    category: 'Terraria',
     minRole: 2,
-    handler: async (message) => {
-        await message.channel.send('Fetching list of currently connected players...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Fetching list of currently connected players...');
         try {
             const stdout = await withSSHConnection(config.terraria, async (client) => {
                 await client.execCommand('screen -S terraria -p 0 -X stuff "playing\\n"');
@@ -286,88 +275,106 @@ registerCommand('player list', {
                     ? playerLines.map((line) => line.split(' ')[0]).join('\n')
                     : 'No players currently connected.';
 
-            await message.channel.send(`Currently connected players:\n${players}`);
+            await respond(interaction, `Currently connected players:\n${players}`);
         } catch (error) {
             console.error('Failed to fetch player list:', error);
-            await message.channel.send('Failed to fetch player list.');
+            await respond(interaction, 'Failed to fetch player list.');
         }
     },
 });
 
-registerCommand('announce', {
+registerCommand({
+    name: 'announce',
+    usage: 'announce <message>',
+    legacyKey: 'announce',
+    description: 'Send an announcement to players currently online in Terraria.',
+    category: 'Terraria',
     minRole: 2,
-    handler: async (message, args) => {
-        const announcement = args.join(' ').trim();
-        if (!announcement) {
-            await message.channel.send('Please provide a message to announce. Usage: `!announce <message>`');
-            return;
-        }
+    options: [
+        {
+            name: 'message',
+            description: 'The announcement to send to online Terraria players.',
+            type: ApplicationCommandOptionType.String,
+            required: true,
+        },
+    ],
+    handler: async (interaction) => {
+        const announcement = interaction.options.getString('message', true).trim();
 
-        await message.channel.send(`Announcement to players: ${announcement}`);
+        await respond(interaction, 'Sending announcement to players...');
         try {
             await withSSHConnection(config.terraria, async (client) => {
-                await client.execCommand(`screen -S terraria -p 0 -X stuff "say ${announcement.replace(/"/g, '\\"')}\\n"`);
+                await client.execCommand(
+                    `screen -S terraria -p 0 -X stuff "say ${announcement.replace(/"/g, '\\"')}\\n"`
+                );
             });
+            await respond(interaction, `Announcement delivered: ${announcement}`);
         } catch (error) {
             console.error('Failed to send announcement:', error);
-            await message.channel.send('Failed to send announcement to players.');
+            await respond(interaction, 'Failed to send announcement to players.');
         }
     },
 });
 
-registerCommand('join terrariaserver', {
+registerCommand({
+    name: 'join_terraria',
+    usage: 'join_terraria',
+    legacyKey: 'join terrariaserver',
+    description: 'Receive instructions on how to join the Terraria server via DM.',
+    category: 'Terraria',
     minRole: 2,
-    handler: async (message) => {
-        await sendDirectMessage(
-            message,
-            `Hello! Here are the instructions to join the Terraria server:
-
-1. Open Terraria.
-2. Click on Multiplayer.
-3. Click on Join via IP.
-4. Enter the server IP and port when prompted.
-
-Server IP: ${config.terraria.publicIp}
-Server Password: ${config.terraria.password}
-Server Port: ${config.terraria.port}`
+    handler: async (interaction) => {
+        await sendDirectMessageWithNotice(
+            interaction,
+            `Hello! Here are the instructions to join the Terraria server:\n\n1. Open Terraria.\n2. Click on Multiplayer.\n3. Click on Join via IP.\n4. Enter the server IP and port when prompted.\n\nServer IP: ${config.terraria.publicIp}\nServer Password: ${config.terraria.password}\nServer Port: ${config.terraria.port}`
         );
     },
 });
 
-registerCommand('status minecraft', {
+registerCommand({
+    name: 'status_minecraft',
+    usage: 'status_minecraft',
+    legacyKey: 'status minecraft',
+    description: 'Check if the Minecraft server is online.',
+    category: 'Minecraft',
     minRole: 2,
-    handler: async (message) => {
-        await message.channel.send('Checking Minecraft server status...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Checking Minecraft server status...');
         try {
             const result = await runSSHCommand(config.minecraft, 'sudo systemctl is-active minecraft');
-            await message.channel.send(`Minecraft server status: ${result.stdout.trim() || result.stderr.trim()}`);
+            const status = result.stdout.trim() || result.stderr.trim();
+            await respond(interaction, `Minecraft server status: ${status}`);
         } catch (error) {
             console.error('Failed to check Minecraft server status:', error);
-            await message.channel.send('Failed to check Minecraft server status.');
+            await respond(interaction, 'Failed to check Minecraft server status.');
         }
     },
 });
 
-registerCommand('join minecraftserver', {
+registerCommand({
+    name: 'join_minecraft',
+    usage: 'join_minecraft',
+    legacyKey: 'join minecraftserver',
+    description: 'Receive instructions on how to join the Minecraft server via DM.',
+    category: 'Minecraft',
     minRole: 2,
-    handler: async (message) => {
-        await sendDirectMessage(
-            message,
-            `To join the Minecraft Bedrock server:
-1. Open Minecraft Bedrock Edition.
-2. Click "Play" > "Servers" > "Add Server".
-3. Enter the server details:
-   - Server IP: ${config.minecraft.publicIp}
-   - Port: ${config.minecraft.port}
-   - Password: ${config.minecraft.password}`
+    handler: async (interaction) => {
+        await sendDirectMessageWithNotice(
+            interaction,
+            `To join the Minecraft Bedrock server:\n1. Open Minecraft Bedrock Edition.\n2. Click "Play" > "Servers" > "Add Server".\n3. Enter the server details:\n   - Server IP: ${config.minecraft.publicIp}\n   - Port: ${config.minecraft.port}\n   - Password: ${config.minecraft.password}`
         );
     },
 });
 
-registerCommand('start terraria', {
+registerCommand({
+    name: 'start_terraria',
+    usage: 'start_terraria',
+    legacyKey: 'start terraria',
+    description: 'Start the Terraria server.',
+    category: 'Terraria',
     minRole: 3,
-    handler: async (message) => {
-        await message.channel.send('Starting Terraria server...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Starting Terraria server...');
         try {
             await withSSHConnection(config.terraria, async (client) => {
                 await client.execCommand(
@@ -379,7 +386,8 @@ registerCommand('start terraria', {
             setTimeout(async () => {
                 try {
                     const online = await isServerOnline(config.terraria.host, config.terraria.port);
-                    await message.channel.send(
+                    await respond(
+                        interaction,
                         online
                             ? 'Terraria server is online and connectable!'
                             : 'Failed to verify if Terraria server started.'
@@ -390,46 +398,61 @@ registerCommand('start terraria', {
             }, 10_000);
         } catch (error) {
             console.error('Failed to start Terraria server:', error);
-            await message.channel.send('Failed to start Terraria server.');
+            await respond(interaction, 'Failed to start Terraria server.');
         }
     },
 });
 
-registerCommand('stop terraria', {
+registerCommand({
+    name: 'stop_terraria',
+    usage: 'stop_terraria',
+    legacyKey: 'stop terraria',
+    description: 'Stop the Terraria server immediately.',
+    category: 'Terraria',
     minRole: 3,
-    handler: async (message) => {
-        await message.channel.send('Stopping Terraria server...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Stopping Terraria server...');
         try {
             await withSSHConnection(config.terraria, (client) => client.execCommand('screen -S terraria -X quit'));
-            await message.channel.send('Terraria server stopped.');
+            await respond(interaction, 'Terraria server stopped.');
         } catch (error) {
             console.error('Failed to stop Terraria server:', error);
-            await message.channel.send('Failed to stop Terraria server.');
+            await respond(interaction, 'Failed to stop Terraria server.');
         }
     },
 });
 
-registerCommand('stop terraria warning', {
+registerCommand({
+    name: 'stop_terraria_warning',
+    usage: 'stop_terraria_warning',
+    legacyKey: 'stop terraria warning',
+    description: 'Warn players and stop the Terraria server after one minute.',
+    category: 'Terraria',
     minRole: 3,
-    handler: async (message) => {
-        await message.channel.send('Warning: The server will stop in 1 minute. Please save your progress.');
+    handler: async (interaction) => {
+        await respond(interaction, 'Warning: The server will stop in 1 minute. Please save your progress.');
         setTimeout(async () => {
             try {
-                await message.channel.send('Stopping Terraria server now...');
+                await respond(interaction, 'Stopping Terraria server now...');
                 await withSSHConnection(config.terraria, (client) => client.execCommand('screen -S terraria -X quit'));
-                await message.channel.send('Terraria server stopped.');
+                await respond(interaction, 'Terraria server stopped.');
             } catch (error) {
                 console.error('Failed to stop Terraria server:', error);
-                await message.channel.send('Failed to stop Terraria server.');
+                await respond(interaction, 'Failed to stop Terraria server.');
             }
         }, 60_000);
     },
 });
 
-registerCommand('restart terraria', {
+registerCommand({
+    name: 'restart_terraria',
+    usage: 'restart_terraria',
+    legacyKey: 'restart terraria',
+    description: 'Restart the Terraria server.',
+    category: 'Terraria',
     minRole: 3,
-    handler: async (message) => {
-        await message.channel.send('Restarting Terraria server...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Restarting Terraria server...');
         try {
             await withSSHConnection(config.terraria, async (client) => {
                 await client.execCommand('screen -S terraria -X quit');
@@ -442,7 +465,8 @@ registerCommand('restart terraria', {
             setTimeout(async () => {
                 try {
                     const online = await isServerOnline(config.terraria.host, config.terraria.port);
-                    await message.channel.send(
+                    await respond(
+                        interaction,
                         online
                             ? 'Terraria server has been restarted and is online!'
                             : 'Failed to verify if Terraria server restarted.'
@@ -453,198 +477,385 @@ registerCommand('restart terraria', {
             }, 10_000);
         } catch (error) {
             console.error('Failed to restart Terraria server:', error);
-            await message.channel.send('Failed to restart Terraria server.');
+            await respond(interaction, 'Failed to restart Terraria server.');
         }
     },
 });
 
-registerCommand('uptime terraria', {
+registerCommand({
+    name: 'uptime_terraria',
+    usage: 'uptime_terraria',
+    legacyKey: 'uptime terraria',
+    description: 'Display Terraria server uptime.',
+    category: 'Terraria',
     minRole: 3,
-    handler: async (message) => {
-        await message.channel.send('Fetching server uptime...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Fetching server uptime...');
         try {
             const result = await runSSHCommand(
                 config.terraria,
                 'ps -eo pid,etime,cmd | grep TerrariaServer | grep -v grep'
             );
             const uptime = result.stdout ? result.stdout.split(/\s+/)[1] : 'Unable to determine uptime.';
-            await message.channel.send(`Server uptime: ${uptime}`);
+            await respond(interaction, `Server uptime: ${uptime}`);
         } catch (error) {
             console.error('Failed to fetch server uptime:', error);
-            await message.channel.send('Failed to fetch server uptime.');
+            await respond(interaction, 'Failed to fetch server uptime.');
         }
     },
 });
 
-registerCommand('start minecraft', {
+registerCommand({
+    name: 'start_minecraft',
+    usage: 'start_minecraft',
+    legacyKey: 'start minecraft',
+    description: 'Start the Minecraft server.',
+    category: 'Minecraft',
     minRole: 3,
-    handler: async (message) => {
-        await message.channel.send('Starting Minecraft server...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Starting Minecraft server...');
         try {
             await runSSHCommand(config.minecraft, 'sudo systemctl start minecraft');
-            await message.channel.send('Minecraft server started.');
+            await respond(interaction, 'Minecraft server started.');
         } catch (error) {
             console.error('Failed to start Minecraft server:', error);
-            await message.channel.send('Failed to start Minecraft server.');
+            await respond(interaction, 'Failed to start Minecraft server.');
         }
     },
 });
 
-registerCommand('stop minecraft', {
+registerCommand({
+    name: 'stop_minecraft',
+    usage: 'stop_minecraft',
+    legacyKey: 'stop minecraft',
+    description: 'Stop the Minecraft server.',
+    category: 'Minecraft',
     minRole: 3,
-    handler: async (message) => {
-        await message.channel.send('Stopping Minecraft server...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Stopping Minecraft server...');
         try {
             await runSSHCommand(config.minecraft, 'sudo systemctl stop minecraft');
-            await message.channel.send('Minecraft server stopped.');
+            await respond(interaction, 'Minecraft server stopped.');
         } catch (error) {
             console.error('Failed to stop Minecraft server:', error);
-            await message.channel.send('Failed to stop Minecraft server.');
+            await respond(interaction, 'Failed to stop Minecraft server.');
         }
     },
 });
 
-registerCommand('restart minecraft', {
+registerCommand({
+    name: 'restart_minecraft',
+    usage: 'restart_minecraft',
+    legacyKey: 'restart minecraft',
+    description: 'Restart the Minecraft server.',
+    category: 'Minecraft',
     minRole: 3,
-    handler: async (message) => {
-        await message.channel.send('Restarting Minecraft server...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Restarting Minecraft server...');
         try {
             await runSSHCommand(config.minecraft, 'sudo systemctl restart minecraft');
-            await message.channel.send('Minecraft server restarted.');
+            await respond(interaction, 'Minecraft server restarted.');
         } catch (error) {
             console.error('Failed to restart Minecraft server:', error);
-            await message.channel.send('Failed to restart Minecraft server.');
+            await respond(interaction, 'Failed to restart Minecraft server.');
         }
     },
 });
 
-registerCommand('backup minecraft', {
+registerCommand({
+    name: 'backup_minecraft',
+    usage: 'backup_minecraft',
+    legacyKey: 'backup minecraft',
+    description: 'Back up the Minecraft server.',
+    category: 'Minecraft',
     minRole: 3,
-    handler: async (message) => {
-        await message.channel.send('Running Minecraft server backup...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Backing up Minecraft server...');
         try {
             await runSSHCommand(config.minecraft, 'sudo /minecraft/backup.sh');
-            await message.channel.send('Minecraft backup completed.');
+            await respond(interaction, 'Minecraft backup completed.');
         } catch (error) {
             console.error('Failed to backup Minecraft server:', error);
-            await message.channel.send('Failed to backup Minecraft server.');
+            await respond(interaction, 'Failed to backup Minecraft server.');
         }
     },
 });
 
-registerCommand('update minecraft', {
+registerCommand({
+    name: 'update_minecraft',
+    usage: 'update_minecraft',
+    legacyKey: 'update minecraft',
+    description: 'Update the Minecraft server.',
+    category: 'Minecraft',
     minRole: 3,
-    handler: async (message) => {
-        await message.channel.send('Updating Minecraft server...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Updating Minecraft server...');
         try {
             await runSSHCommand(config.minecraft, 'sudo /minecraft/update.sh');
-            await message.channel.send('Minecraft update completed.');
+            await respond(interaction, 'Minecraft update completed.');
         } catch (error) {
             console.error('Failed to update Minecraft server:', error);
-            await message.channel.send('Failed to update Minecraft server.');
+            await respond(interaction, 'Failed to update Minecraft server.');
         }
     },
 });
 
-registerCommand('restore minecraft', {
+registerCommand({
+    name: 'restore_minecraft',
+    usage: 'restore_minecraft',
+    legacyKey: 'restore minecraft',
+    description: 'Restore the Minecraft server from backup.',
+    category: 'Minecraft',
     minRole: 3,
-    handler: async (message) => {
-        await message.channel.send('Restoring Minecraft server worlds, settings, and permissions...');
+    handler: async (interaction) => {
+        await respond(interaction, 'Restoring Minecraft server worlds, settings, and permissions...');
         try {
             await runSSHCommand(config.minecraft, 'sudo /minecraft/restore.sh');
-            await message.channel.send('Minecraft restore completed.');
+            await respond(interaction, 'Minecraft restore completed.');
         } catch (error) {
             console.error('Failed to restore Minecraft server:', error);
-            await message.channel.send('Failed to restore Minecraft server.');
+            await respond(interaction, 'Failed to restore Minecraft server.');
         }
     },
 });
 
-registerCommand('set minecraftpatch', {
+registerCommand({
+    name: 'set_minecraftpatch',
+    usage: 'set_minecraftpatch <patch>',
+    legacyKey: 'set minecraftpatch',
+    description: 'Update the Minecraft Bedrock download link to a specific patch version.',
+    category: 'Minecraft',
     minRole: 3,
-    handler: async (message, args) => {
-        const patch = args.join(' ').trim();
+    options: [
+        {
+            name: 'patch',
+            description: 'The Minecraft Bedrock patch version (e.g., 1.21.113.1).',
+            type: ApplicationCommandOptionType.String,
+            required: true,
+        },
+    ],
+    handler: async (interaction) => {
+        const patch = interaction.options.getString('patch', true).trim();
         const patchRegex = /^\d+\.\d+\.\d+\.\d+$/;
 
         if (!patchRegex.test(patch)) {
-            await message.channel.send('Invalid patch format. Please use the format `!set minecraftpatch 1.21.113.1`.');
+            await respond(
+                interaction,
+                'Invalid patch format. Please use the format `/set_minecraftpatch 1.21.113.1`.',
+                { ephemeral: true }
+            );
             return;
         }
 
         const newLink = `https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock-server-${patch}.zip`;
         const command = `echo "${newLink}" | sudo tee /minecraft/bedrock_last_link.txt > /dev/null`;
 
-        await message.channel.send('Updating Minecraft Bedrock download link...');
+        await respond(interaction, 'Updating Minecraft Bedrock download link...');
         try {
             await runSSHCommand(config.minecraft, command);
-            await message.channel.send(`Minecraft Bedrock download link updated to version ${patch}.`);
+            await respond(interaction, `Minecraft Bedrock download link updated to version ${patch}.`);
         } catch (error) {
             console.error('Failed to update Minecraft download link:', error);
-            await message.channel.send('Failed to update the download link due to insufficient permissions or other errors.');
+            await respond(
+                interaction,
+                'Failed to update the download link due to insufficient permissions or other errors.'
+            );
         }
     },
 });
 
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
+async function respondWithServerHelp(interaction) {
+    const member = interaction.member ?? null;
+    const roleLevel = getMemberRoleLevel(member);
 
-    const trimmedContent = message.content.trim();
-    if (!trimmedContent.startsWith(COMMAND_PREFIX)) {
+    if (roleLevel === 0) {
+        await respond(interaction, 'You do not have the required permissions to use bot commands.', { ephemeral: true });
         return;
     }
 
-    if (!message.guild) {
-        await message.reply('Please use commands within the Discord server.');
-        return;
+    const commandsByRole = new Map();
+    for (let i = 1; i <= ROLE_PRIORITY.length; i += 1) {
+        commandsByRole.set(ROLE_PRIORITY[i - 1], []);
     }
 
-    const commandBody = trimmedContent.slice(COMMAND_PREFIX.length).trim();
-    if (!commandBody) {
-        return;
+    commandDefinitions
+        .filter((command) => command.type === ApplicationCommandType.ChatInput)
+        .forEach((command) => {
+            if (command.minRole <= 0 || command.minRole > ROLE_PRIORITY.length) {
+                return;
+            }
+            const roleName = ROLE_PRIORITY[command.minRole - 1];
+            const entries = commandsByRole.get(roleName);
+            entries.push(command);
+        });
+
+    const lines = [];
+    lines.push('Here are the available server commands by role:');
+    lines.push('');
+
+    for (let i = 0; i < ROLE_PRIORITY.length; i += 1) {
+        const roleName = ROLE_PRIORITY[i];
+        const commands = commandsByRole.get(roleName) || [];
+        if (commands.length === 0) {
+            continue;
+        }
+
+        lines.push(`${roleName}:`);
+        commands
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .forEach((command) => {
+                const usageSuffix = command.usage.replace(command.name, '').trim();
+                const usageLine = usageSuffix ? `/${command.name} ${usageSuffix}` : `/${command.name}`;
+                lines.push(`• ${usageLine} — ${command.description}`);
+            });
+        lines.push('');
     }
 
-    const lowerBody = commandBody.toLowerCase();
-    const matchingKeys = [...commandRegistry.keys()].filter(
-        (key) => lowerBody === key || lowerBody.startsWith(`${key} `)
+    lines.push(
+        `Your highest recognized role is: ${roleLevel > 0 ? ROLE_PRIORITY[roleLevel - 1] : 'None'}. You can use all commands listed for your role and any preceding roles.`
     );
 
-    let matchedKey = null;
-    if (matchingKeys.length > 0) {
-        matchedKey = matchingKeys.sort((a, b) => b.length - a.length)[0];
+    await respond(interaction, lines.join('\n'), { ephemeral: true });
+}
+
+const serverHelpCommand = {
+    name: 'server',
+    usage: 'server',
+    legacyKey: 'serverhelp',
+    description: 'Display the list of available server commands grouped by role.',
+    category: 'Help',
+    minRole: 1,
+    handler: respondWithServerHelp,
+};
+
+registerCommand(serverHelpCommand);
+registerCommand({
+    ...serverHelpCommand,
+    name: 'Server Command Reference',
+    type: ApplicationCommandType.User,
+    handler: respondWithServerHelp,
+});
+
+async function registerSlashCommands(clientInstance) {
+    const rest = new REST({ version: '10' }).setToken(config.discordToken);
+
+    const body = commandDefinitions.map((command) => {
+        const base = {
+            name: command.name,
+            type: command.type,
+            dm_permission: false,
+        };
+
+        if (command.type === ApplicationCommandType.ChatInput) {
+            base.description = command.description;
+            base.options = command.options;
+        }
+
+        const allowedRoles = getAllowedRoleNames(command.minRole);
+        base.default_member_permissions = allowedRoles.length > 0 ? '0' : null;
+
+        return base;
+    });
+
+    const guilds = clientInstance.guilds.cache;
+    for (const guild of guilds.values()) {
+        try {
+            const registeredCommands = await rest.put(
+                Routes.applicationGuildCommands(clientInstance.user.id, guild.id),
+                { body }
+            );
+            await applyRolePermissions(guild, registeredCommands);
+        } catch (error) {
+            console.error(`Failed to register commands for guild ${guild.id}:`, error);
+        }
     }
+}
 
-    const roleLevel = getUserRoleLevel(message);
+async function applyRolePermissions(guild, registeredCommands) {
+    await guild.roles.fetch();
 
-    if (lowerBody === 'serverhelp' || lowerBody === 'phineashelp') {
-        await handleHelp(message, roleLevel);
+    for (const apiCommand of registeredCommands) {
+        const key = getCommandKey(apiCommand.name, apiCommand.type);
+        const metadata = commandRegistry.get(key);
+        if (!metadata) {
+            continue;
+        }
+
+        const allowedRoleNames = getAllowedRoleNames(metadata.minRole);
+        if (allowedRoleNames.length === 0) {
+            continue;
+        }
+
+        const resolvedRoles = allowedRoleNames
+            .map((roleName) => guild.roles.cache.find((role) => role.name === roleName))
+            .filter(Boolean);
+
+        if (resolvedRoles.length === 0) {
+            console.warn(`No matching roles found for command ${apiCommand.name} in guild ${guild.name}.`);
+            continue;
+        }
+
+        const permissions = resolvedRoles.map((role) => ({
+            id: role.id,
+            type: ApplicationCommandPermissionType.Role,
+            permission: true,
+        }));
+
+        try {
+            await guild.commands.permissions.set({
+                command: apiCommand.id,
+                permissions,
+            });
+        } catch (error) {
+            console.error(`Failed to set permissions for command ${apiCommand.name} in guild ${guild.name}:`, error);
+        }
+    }
+}
+
+client.on('interactionCreate', async (interaction) => {
+    if (
+        !interaction.isChatInputCommand() &&
+        !interaction.isUserContextMenuCommand() &&
+        !interaction.isMessageContextMenuCommand()
+    ) {
         return;
     }
 
-    const command = matchedKey ? commandRegistry.get(matchedKey) : undefined;
+    const key = getCommandKey(interaction.commandName, interaction.commandType);
+    const command = commandRegistry.get(key);
 
     if (!command) {
-        await message.reply('You have either entered an invalid command or you do not have the required permissions to use this command.');
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.reply({
+                content: 'This command is not available right now.',
+                ephemeral: true,
+            });
+        }
         return;
     }
 
-    if (roleLevel < command.minRole) {
-        await message.reply('You do not have the required permissions to use this command.');
-        return;
-    }
-
-    if (checkRateLimit(message.author.id, matchedKey || lowerBody)) {
-        await message.reply('Please wait before using this command again.');
+    if (checkRateLimit(interaction.user.id, command.legacyKey)) {
+        await respond(interaction, 'Please wait before using this command again.', { ephemeral: true });
         return;
     }
 
     try {
-        logPrivilegedCommand(message, matchedKey || lowerBody);
-        const argString = matchedKey ? commandBody.slice(matchedKey.length).trim() : '';
-        const args = argString ? argString.split(/\s+/) : [];
-        await command.handler(message, args);
+        logPrivilegedCommand(interaction, command.legacyKey);
+        await command.handler(interaction);
     } catch (error) {
-        console.error(`Unexpected error while executing ${COMMAND_PREFIX}${commandBody}:`, error);
-        await message.reply('An unexpected error occurred while processing your command.');
+        console.error(`Unexpected error while executing /${interaction.commandName}:`, error);
+        if (interaction.deferred || interaction.replied) {
+            await interaction.followUp({
+                content: 'An unexpected error occurred while processing your command.',
+                ephemeral: true,
+            });
+        } else {
+            await interaction.reply({
+                content: 'An unexpected error occurred while processing your command.',
+                ephemeral: true,
+            });
+        }
     }
 });
 

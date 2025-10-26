@@ -30,7 +30,7 @@ const config = {
     terraria: {
         host: process.env.TERRARIA_GAME_SERVER_IP,
         username: process.env.TERRARIA_SSH_USER,
-        privateKeyPath: process.env.TERRARIA_SSH_KEY_PATH,
+        privateKeyPath: process.env.TERRARIA_SSH_PRIVATE_KEY_PATH,
         publicIp: process.env.TERRARIA_PUBLIC_IP,
         port: Number(process.env.TERRARIA_PORT),
         password: process.env.TERRARIA_PASS,
@@ -38,7 +38,7 @@ const config = {
     minecraft: {
         host: process.env.MINECRAFT_GAME_SERVER_IP,
         username: process.env.MINECRAFT_SSH_USER,
-        privateKeyPath: process.env.MINECRAFT_SSH_KEY_PATH,
+        privateKeyPath: process.env.MINECRAFT_SSH_PRIVATE_KEY_PATH,
         publicIp: process.env.MINECRAFT_PUBLIC_IP,
         port: Number(process.env.MINECRAFT_PORT),
         password: process.env.MINECRAFT_PASS,

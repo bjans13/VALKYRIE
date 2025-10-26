@@ -46,7 +46,7 @@ Create a `.env` file in the project root with the following variables:
 | `MINECRAFT_PASS` | Minecraft Bedrock server password. |
 
 > **Tip:** keep private keys out of the repository. Store them securely on the deployment host and reference them via the
-> `*_SSH_KEY_PATH` variables.
+> `*_SSH_PRIVATE_KEY_PATH` variables.
 
 ## Installation
 

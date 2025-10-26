@@ -3,8 +3,9 @@ const {
     GatewayIntentBits,
     REST,
     Routes,
+    SlashCommandBuilder,
+    ContextMenuCommandBuilder,
     ApplicationCommandOptionType,
-    ApplicationCommandPermissionType,
     ApplicationCommandType,
 } = require('discord.js');
 const net = require('net');
@@ -221,20 +222,56 @@ function logPrivilegedCommand(interaction, commandKey) {
     console.log(JSON.stringify(logEntry));
 }
 
-function getAllowedRoleNames(minRole) {
-    if (minRole <= 0) {
-        return [];
-    }
-
-    return ROLE_PRIORITY.slice(minRole - 1);
-}
-
 function getCommandKey(name, type = ApplicationCommandType.ChatInput) {
     return `${type}:${name}`;
 }
 
 const commandDefinitions = [];
 const commandRegistry = new Map();
+
+function applyDefaultPermissions(builder, command) {
+    const permissionValue = command.defaultMemberPermissions ?? null;
+    return builder.setDefaultMemberPermissions(permissionValue);
+}
+
+function createCommandBuilder(command) {
+    if (command.type === ApplicationCommandType.ChatInput) {
+        const builder = new SlashCommandBuilder()
+            .setName(command.name)
+            .setDescription(command.description)
+            .setDMPermission(false);
+
+        for (const option of command.options) {
+            if (option.type === ApplicationCommandOptionType.String) {
+                builder.addStringOption((opt) =>
+                    opt
+                        .setName(option.name)
+                        .setDescription(option.description)
+                        .setRequired(Boolean(option.required))
+                );
+                continue;
+            }
+
+            throw new Error(`Unsupported option type for ${command.name}: ${option.type}`);
+        }
+
+        return applyDefaultPermissions(builder, command);
+    }
+
+    if (
+        command.type === ApplicationCommandType.User ||
+        command.type === ApplicationCommandType.Message
+    ) {
+        const builder = new ContextMenuCommandBuilder()
+            .setName(command.name)
+            .setType(command.type)
+            .setDMPermission(false);
+
+        return applyDefaultPermissions(builder, command);
+    }
+
+    return null;
+}
 
 function registerCommand(definition) {
     const normalized = {
@@ -245,6 +282,8 @@ function registerCommand(definition) {
         usage: definition.usage ?? definition.name,
         category: definition.category ?? 'General',
     };
+
+    normalized.builder = createCommandBuilder(normalized);
 
     const key = getCommandKey(normalized.name, normalized.type);
     commandDefinitions.push(normalized);
@@ -760,75 +799,20 @@ registerCommand({
 async function registerSlashCommands(clientInstance) {
     const rest = new REST({ version: '10' }).setToken(config.discordToken);
 
-    const body = commandDefinitions.map((command) => {
-        const base = {
-            name: command.name,
-            type: command.type,
-            dm_permission: false,
-        };
-
-        if (command.type === ApplicationCommandType.ChatInput) {
-            base.description = command.description;
-            base.options = command.options;
-        }
-
-        const allowedRoles = getAllowedRoleNames(command.minRole);
-        base.default_member_permissions = allowedRoles.length > 0 ? '0' : null;
-
-        return base;
-    });
+    const body = commandDefinitions
+        .map((command) => command.builder)
+        .filter(Boolean)
+        .map((builder) => builder.toJSON());
 
     const guilds = clientInstance.guilds.cache;
     for (const guild of guilds.values()) {
         try {
-            const registeredCommands = await rest.put(
+            await rest.put(
                 Routes.applicationGuildCommands(clientInstance.user.id, guild.id),
                 { body }
             );
-            await applyRolePermissions(guild, registeredCommands);
         } catch (error) {
             console.error(`Failed to register commands for guild ${guild.id}:`, error);
-        }
-    }
-}
-
-async function applyRolePermissions(guild, registeredCommands) {
-    await guild.roles.fetch();
-
-    for (const apiCommand of registeredCommands) {
-        const key = getCommandKey(apiCommand.name, apiCommand.type);
-        const metadata = commandRegistry.get(key);
-        if (!metadata) {
-            continue;
-        }
-
-        const allowedRoleNames = getAllowedRoleNames(metadata.minRole);
-        if (allowedRoleNames.length === 0) {
-            continue;
-        }
-
-        const resolvedRoles = allowedRoleNames
-            .map((roleName) => guild.roles.cache.find((role) => role.name === roleName))
-            .filter(Boolean);
-
-        if (resolvedRoles.length === 0) {
-            console.warn(`No matching roles found for command ${apiCommand.name} in guild ${guild.name}.`);
-            continue;
-        }
-
-        const permissions = resolvedRoles.map((role) => ({
-            id: role.id,
-            type: ApplicationCommandPermissionType.Role,
-            permission: true,
-        }));
-
-        try {
-            await guild.commands.permissions.set({
-                command: apiCommand.id,
-                permissions,
-            });
-        } catch (error) {
-            console.error(`Failed to set permissions for command ${apiCommand.name} in guild ${guild.name}:`, error);
         }
     }
 }
@@ -853,6 +837,20 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
         return;
+    }
+
+    if (command.minRole > 0) {
+        const member = interaction.member ?? null;
+        const roleLevel = getMemberRoleLevel(member);
+        if (roleLevel < command.minRole) {
+            const requiredRoleName = ROLE_PRIORITY[command.minRole - 1] ?? 'required';
+            await respond(
+                interaction,
+                `You must hold the ${requiredRoleName} role or higher to use this command.`,
+                { ephemeral: true }
+            );
+            return;
+        }
     }
 
     if (checkRateLimit(interaction.user.id, command.legacyKey)) {

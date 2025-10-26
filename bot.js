@@ -16,6 +16,8 @@ require('dotenv').config();
 
 const REQUIRED_ENV_VARS = [
     'DISCORD_TOKEN',
+    'ALLOWED_GUILDS',
+    'OWNER',
     'TERRARIA_GAME_SERVER_IP',
     'TERRARIA_SSH_USER',
     'TERRARIA_SSH_PRIVATE_KEY_PATH',
@@ -35,8 +37,30 @@ if (missingEnv.length > 0) {
     throw new Error(`Missing required environment variables: ${missingEnv.join(', ')}`);
 }
 
+const allowedGuilds = (process.env.ALLOWED_GUILDS || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+if (allowedGuilds.length === 0) {
+    throw new Error('ALLOWED_GUILDS must specify at least one guild ID.');
+}
+
+for (const guildId of allowedGuilds) {
+    if (!/^\d+$/.test(guildId)) {
+        throw new Error(`Invalid guild ID in ALLOWED_GUILDS: ${guildId}`);
+    }
+}
+
+const ownerId = process.env.OWNER.trim();
+if (!/^\d+$/.test(ownerId)) {
+    throw new Error('OWNER must be set to a numeric Discord user ID.');
+}
+
 const config = {
     discordToken: process.env.DISCORD_TOKEN,
+    allowedGuilds,
+    ownerId,
     terraria: {
         host: process.env.TERRARIA_GAME_SERVER_IP,
         username: process.env.TERRARIA_SSH_USER,
@@ -63,6 +87,54 @@ validateFilesystemPrerequisites([
     { name: 'Terraria', keyPath: config.terraria.privateKeyPath },
     { name: 'Minecraft', keyPath: config.minecraft.privateKeyPath },
 ]);
+
+let ownerUser = null;
+const unauthorizedGuildNotices = new Set();
+
+function isAllowedGuild(guildId) {
+    return Boolean(guildId && config.allowedGuilds.includes(guildId));
+}
+
+async function getOwnerUser(clientInstance) {
+    if (!config.ownerId) {
+        return null;
+    }
+
+    if (ownerUser && ownerUser.id === config.ownerId) {
+        return ownerUser;
+    }
+
+    try {
+        ownerUser = await clientInstance.users.fetch(config.ownerId);
+        return ownerUser;
+    } catch (error) {
+        console.error('Failed to fetch owner user for alerts:', error);
+        return null;
+    }
+}
+
+async function alertOwner(clientInstance, message) {
+    const owner = await getOwnerUser(clientInstance);
+    if (!owner) {
+        return;
+    }
+
+    try {
+        await owner.send(message);
+    } catch (error) {
+        console.error('Failed to send alert to owner:', error);
+    }
+}
+
+async function reportUnauthorizedGuild(clientInstance, guildId, context, guildName = 'Unknown') {
+    const label = guildId ? `${guildName} (${guildId})` : guildName;
+    console.warn(`[SECURITY] ${context}: unauthorized guild ${label}.`);
+
+    if (guildId && !unauthorizedGuildNotices.has(guildId)) {
+        unauthorizedGuildNotices.add(guildId);
+        await alertOwner(clientInstance, `[SECURITY] ${context}: unauthorized guild ${label}.`);
+    }
+}
 
 const ROLE_PRIORITY = ['Friends', 'Crows', 'Server Mgt'];
 const SENSITIVE_COMMANDS = new Set([
@@ -92,9 +164,26 @@ const client = new Client({
 client.once('ready', async () => {
     console.log(`Bot connected as ${client.user.tag}`);
     try {
+        await getOwnerUser(client);
+    } catch (error) {
+        console.error('Unable to resolve owner user during startup:', error);
+    }
+
+    try {
         await registerSlashCommands(client);
     } catch (error) {
         console.error('Failed to register slash commands via REST:', error);
+    }
+
+    for (const guild of client.guilds.cache.values()) {
+        if (!isAllowedGuild(guild.id)) {
+            await reportUnauthorizedGuild(
+                client,
+                guild.id,
+                'Detected on startup',
+                guild.name ?? 'Unknown'
+            );
+        }
     }
 });
 
@@ -806,6 +895,16 @@ async function registerSlashCommands(clientInstance) {
 
     const guilds = clientInstance.guilds.cache;
     for (const guild of guilds.values()) {
+        if (!isAllowedGuild(guild.id)) {
+            await reportUnauthorizedGuild(
+                clientInstance,
+                guild.id,
+                'Skipped command registration',
+                guild.name ?? 'Unknown'
+            );
+            continue;
+        }
+
         try {
             await rest.put(
                 Routes.applicationGuildCommands(clientInstance.user.id, guild.id),
@@ -817,12 +916,36 @@ async function registerSlashCommands(clientInstance) {
     }
 }
 
+client.on('guildCreate', async (guild) => {
+    if (isAllowedGuild(guild.id)) {
+        return;
+    }
+
+    await reportUnauthorizedGuild(
+        client,
+        guild.id,
+        'Joined unauthorized guild',
+        guild.name ?? 'Unknown'
+    );
+});
+
 client.on('interactionCreate', async (interaction) => {
     if (
         !interaction.isChatInputCommand() &&
         !interaction.isUserContextMenuCommand() &&
         !interaction.isMessageContextMenuCommand()
     ) {
+        return;
+    }
+
+    const guildId = interaction.guildId ?? null;
+    if (!isAllowedGuild(guildId)) {
+        await reportUnauthorizedGuild(
+            client,
+            guildId,
+            'Blocked interaction',
+            interaction.guild?.name ?? 'Unknown'
+        );
         return;
     }
 

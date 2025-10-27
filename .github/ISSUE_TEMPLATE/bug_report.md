@@ -24,8 +24,8 @@ A clear and concise description of what you expected to happen.
 If applicable, add screenshots to help explain your problem.
 
 **Environment (please complete the following information):**
- - OS: [e.g. Windows, Linux]
- - Node.js Version: [e.g. 16.x]
+ - OS: [e.g. Debian 13, Ubuntu 22.04]
+ - Node.js Version: [e.g. 20.x LTS]
  - Bot Version: [e.g. 1.0.0]
 
 **Additional context**

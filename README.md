@@ -29,7 +29,7 @@ I am that guardian."
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 18+ (tested with Node.js 20 LTS)
 - Access credentials for the managed game servers
 - Discord bot token with the Message Content intent enabled
 
@@ -57,6 +57,20 @@ npm start
 
 The bot validates the environment variables listed above during startup and exits with an error message if any are missing or
 malformed. This ensures misconfiguration is caught early.
+
+## Development Checklist
+
+The repository includes npm scripts for the most common local checks:
+
+```bash
+# Run the automated test suite
+npm test
+
+# Lint the codebase
+npm run lint
+```
+
+Run these commands before opening a pull request to ensure your changes meet the baseline quality bar.
 
 > **Tested platform:** Debian 13 (Trixie) LXC container running on Proxmox VE 9.
 

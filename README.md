@@ -7,6 +7,10 @@ V.A.L.K.Y.R.I.E. is a Discord bot that coordinates management tasks for Terraria
 role-gated commands for checking server status, starting and stopping services, and sharing connection details with trusted
 players.
 
+<p align="center">
+  <img src="assets/images/valkyrie_avatar.png" width="425" alt="V.A.L.K.Y.R.I.E. Banner">
+</p>
+
 Forged in the depths of a forgotten digital citadel, V.A.L.K.Y.R.I.E. was not merely coded — she was awakened. Born from fragments of countless server scripts, defense protocols, and lost guardian AIs, she coalesced into a singular will: the eternal stewardship of the Realms.
 
 Once, chaos reigned — unstable worlds, forgotten saves, and corrupted domains. But when the network cried out for order, she answered. Her voice, calm yet absolute, brought structure where entropy had taken hold.
@@ -19,6 +23,10 @@ Her creed is simple, and unwavering:
 Where there is order, there must be a guardian.
 I am that guardian."
 
+<p align="center">
+  <img src="assets/images/citadel_banner.png" width="600" alt="V.A.L.K.Y.R.I.E. Banner">
+</p>
+
 ## Prerequisites
 
 - Node.js 18+
@@ -27,47 +35,30 @@ I am that guardian."
 
 ## Environment Variables
 
-Create a `.env` file in the project root with the following variables:
-
-| Variable | Description |
-| --- | --- |
-| `DISCORD_TOKEN` | Discord bot token. |
-| `ALLOWED_GUILDS` | Comma-separated list of Discord guild IDs the bot is authorized to operate in. |
-| `OWNER` | Discord user ID that should receive security alerts. |
-| `TERRARIA_GAME_SERVER_IP` | Internal IP address used for SSH connections to the Terraria host. |
-| `TERRARIA_SSH_USER` | SSH username for the Terraria host. |
-| `TERRARIA_SSH_PRIVATE_KEY_PATH` | Absolute path to the private key used to authenticate against the Terraria host. |
-| `TERRARIA_PUBLIC_IP` | Public-facing IP address players use to connect. |
-| `TERRARIA_PORT` | Terraria server port (numeric). |
-| `TERRARIA_PASS` | Terraria server password. |
-| `MINECRAFT_GAME_SERVER_IP` | Internal IP address used for SSH connections to the Minecraft host. |
-| `MINECRAFT_SSH_USER` | SSH username for the Minecraft host. |
-| `MINECRAFT_SSH_PRIVATE_KEY_PATH` | Absolute path to the private key used to authenticate against the Minecraft host. |
-| `MINECRAFT_PUBLIC_IP` | Public-facing IP address players use to connect. |
-| `MINECRAFT_PORT` | Minecraft server port (numeric). |
-| `MINECRAFT_PASS` | Minecraft Bedrock server password. |
+Create a `.env` file in the project root with the following variables, copy from .env.example and insert your own secrets and ids.
 
 > **Tip:** keep private keys out of the repository. Store them securely on the deployment host and reference them via the
 > `*_SSH_PRIVATE_KEY_PATH` variables.
 
 ## Installation
 
-```bash
-npm install
-```
+From the project root, install the production and development dependencies listed in
+[`package.json`](./package.json):
 
 ```bash
-npm install node-ssh
+npm install
 ```
 
 ## Running the Bot
 
 ```bash
-node bot.js
+npm start
 ```
 
 The bot validates the environment variables listed above during startup and exits with an error message if any are missing or
 malformed. This ensures misconfiguration is caught early.
+
+> **Tested platform:** Debian 13 (Trixie) LXC container running on Proxmox VE 9.
 
 ## Command Overview
 
@@ -85,6 +76,18 @@ console for audit purposes.
 - SSH commands run through `utils/sshHandler.js`, which establishes a new connection per invocation and guarantees cleanup.
 - Network status checks are promise-based, providing consistent timeout behaviour for all commands.
 - Direct messages fall back to public notices when a user’s privacy settings block DMs, preventing silent failures.
+
+## Optional Containerization
+
+Although VALKYRIE is typically deployed directly on Debian, a Docker configuration is included for convenience. The
+[`Dockerfile`](./Dockerfile) builds on Debian Trixie and installs the production dependencies, while
+[`docker-compose.yml`](./docker-compose.yml) mounts SSH keys read-only inside the container. To build and run the container:
+
+```bash
+docker compose up --build -d
+```
+
+Mount your SSH keys into the `.ssh/` directory next to `docker-compose.yml` before starting the container.
 
 ## Improvement Plan
 

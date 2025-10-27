@@ -1,0 +1,40 @@
+{
+  "name": "valkyrie",
+  "version": "1.0.0",
+  "description": "A powerful Discord bot with SSH handling capabilities",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "nodemon bot.js",
+    "test": "jest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bjans13/VALKYRIE.git"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "ssh",
+    "automation"
+  ],
+  "author": "bjans13",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/bjans13/VALKYRIE/issues"
+  },
+  "homepage": "https://github.com/bjans13/VALKYRIE#readme",
+  "dependencies": {
+    "discord.js": "^14.x",
+    "dotenv": "^16.x",
+    "node-ssh": "^13.0.0",
+    "winston": "^3.x"
+  },
+  "devDependencies": {
+    "eslint": "^8.x",
+    "jest": "^29.x",
+    "nodemon": "^3.x"
+  }
+}

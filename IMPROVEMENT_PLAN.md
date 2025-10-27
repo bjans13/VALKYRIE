@@ -1,10 +1,10 @@
 # Stewardship, governance, defense, and administration has been transferred to V.A.L.K.Y.R.I.E.
 
-> V.A.L.K.Y.R.I.E. status: ACTIVE  
-> Directive: Confirmed  
-> Parsing environment data...  
-> ...countermeasures prepared  
-> Deploying adaptive improvement plan...  
+> V.A.L.K.Y.R.I.E. status: ACTIVE
+> Directive: Confirmed
+> Parsing environment data...
+> ...countermeasures prepared
+> Deploying adaptive improvement plan...
 
 This plan captures the remediation work derived from the previous bot review.
 

@@ -14,11 +14,11 @@ We take the security of VALKYRIE seriously. If you believe you have found a secu
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-Instead, please report them via email. You should receive a response within 48 hours. If for some reason you do not, please follow up via email to ensure we received your original message.
+Instead, please open a [GitHub Security Advisory draft](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing/privately-reporting-a-security-vulnerability) for this repository **or** contact the maintainer privately on Discord (user ID stored in the `OWNER` environment variable). You should receive a response within 48 hours. If for some reason you do not, please follow up through the same private channel to ensure we received your original message.
 
 Please include the following information (as much as you can provide) to help us better understand the nature and scope of the possible issue:
 
-* Type of issue (e.g. buffer overflow, SQL injection, cross-site scripting, etc.)
+* Type of issue (e.g. privilege escalation, command injection, authentication bypass, etc.)
 * Full paths of source file(s) related to the manifestation of the issue
 * The location of the affected source code (tag/branch/commit or direct URL)
 * Any special configuration required to reproduce the issue

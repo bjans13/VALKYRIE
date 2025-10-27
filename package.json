@@ -29,8 +29,8 @@
   "dependencies": {
     "discord.js": "^14.x",
     "dotenv": "^16.x",
-    "winston": "^3.x",
-    "ssh2": "^1.x"
+    "node-ssh": "^13.0.0",
+    "winston": "^3.x"
   },
   "devDependencies": {
     "eslint": "^8.x",

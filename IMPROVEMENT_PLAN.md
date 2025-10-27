@@ -23,7 +23,7 @@ This plan captures the remediation work derived from the previous bot review.
 1. Consolidate SSH logic behind `utils/sshHandler.js` so bot commands do not reimplement connection handling.
 2. Replace large chains of `if` statements with a command registry for clearer routing and future extensibility.
 3. Validate critical environment variables during startup to fail fast when configuration is incomplete.
-4. Fix the unreachable `!restore minecraft` command trigger.
+4. Fix the unreachable `/restore minecraft` command trigger.
 
 ## todo
 - Add automated test coverage for the command registry, rate limiting, and SSH utilities to prevent regressions.

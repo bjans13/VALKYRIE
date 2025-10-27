@@ -52,22 +52,23 @@ Create a `.env` file in the project root with the following variables:
 
 ## Installation
 
-```bash
-npm install
-```
+From the project root, install the production and development dependencies listed in
+[`package.json`](./package.json):
 
 ```bash
-npm install node-ssh
+npm install
 ```
 
 ## Running the Bot
 
 ```bash
-node bot.js
+npm start
 ```
 
 The bot validates the environment variables listed above during startup and exits with an error message if any are missing or
 malformed. This ensures misconfiguration is caught early.
+
+> **Tested platform:** Debian 13 (Trixie) LXC container running on Proxmox VE 9.
 
 ## Command Overview
 
@@ -85,6 +86,18 @@ console for audit purposes.
 - SSH commands run through `utils/sshHandler.js`, which establishes a new connection per invocation and guarantees cleanup.
 - Network status checks are promise-based, providing consistent timeout behaviour for all commands.
 - Direct messages fall back to public notices when a user’s privacy settings block DMs, preventing silent failures.
+
+## Optional Containerization
+
+Although VALKYRIE is typically deployed directly on Debian, a Docker configuration is included for convenience. The
+[`Dockerfile`](./Dockerfile) builds on Debian Trixie and installs the production dependencies, while
+[`docker-compose.yml`](./docker-compose.yml) mounts SSH keys read-only inside the container. To build and run the container:
+
+```bash
+docker compose up --build -d
+```
+
+Mount your SSH keys into the `.ssh/` directory next to `docker-compose.yml` before starting the container.
 
 ## Improvement Plan
 

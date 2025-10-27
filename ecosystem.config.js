@@ -16,6 +16,6 @@ module.exports = {
     instances: 1,
     autorestart: true,
     max_restarts: 10,
-    restart_delay: 4000
-  }]
+    restart_delay: 4000,
+  }],
 };

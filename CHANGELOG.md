@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Clarified installation instructions and container usage notes.
+- Updated documentation to reflect the slash command (`/`) prefix.
 
 ### Deprecated
 

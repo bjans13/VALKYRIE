@@ -62,7 +62,7 @@ malformed. This ensures misconfiguration is caught early.
 
 ## Command Overview
 
-Commands are prefixed with `!` and are only available inside Discord guild channels. Access is role-based:
+Commands are exposed as Discord slash commands (prefixed with `/`) and are only available inside Discord guild channels. Access is role-based:
 
 - **Friends** – Status lookups only.
 - **Crows** – Includes Friends commands plus player queries, announcements, and connection instructions.

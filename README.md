@@ -27,11 +27,30 @@ I am that guardian."
   <img src="assets/images/citadel_banner.png" width="600" alt="V.A.L.K.Y.R.I.E. Banner">
 </p>
 
+## Features
+
+- Slash command toolkit for administering Terraria and Minecraft services (status, start, stop, restart, backup, and restore routines).
+- Role-tiered access control so only trusted Discord members can issue sensitive automation commands.
+- Structured logging and owner alerts for privileged operations and unauthorized guild access attempts.
+- SSH orchestration layer that opens fresh connections per request, keeping infrastructure credentials compartmentalized.
+- Optional Docker Compose deployment path with read-only SSH key mounts.
+
 ## Prerequisites
 
 - Node.js 18+ (tested with Node.js 20 LTS)
 - Access credentials for the managed game servers
 - Discord bot token with the Message Content intent enabled
+
+## Self-Host Quickstart
+
+1. **Create a Discord application.** Visit the [Discord Developer Portal](https://discord.com/developers/applications), create a new application, and add a Bot user.
+2. **Configure bot privileges.**
+   - Enable the **SERVER MEMBERS INTENT** and **MESSAGE CONTENT INTENT** toggles to match the runtime configuration.
+   - Regenerate a bot token and store it as `DISCORD_TOKEN` in your `.env` file.
+   - Create an invite URL with the `bot` and `applications.commands` scopes plus minimal permissions (`Send Messages`, `Embed Links`, `Read Message History`).
+3. **Allow only trusted guilds.** Populate `ALLOWED_GUILDS` in `.env` with the server IDs that may host VALKYRIE and set `OWNER` to the Discord user ID that should receive security alerts.
+4. **Provision server credentials.** Copy `.env.example` to `.env` and fill in the SSH connection details for each managed Terraria and Minecraft host. Store private keys on the deployment target and reference them via the path variables.
+5. **Install dependencies and bootstrap commands.** Run `npm install` followed by `npm start`. On the first launch, the bot registers slash commands for every allowed guild and will exit if a required environment variable is missing.
 
 ## Environment Variables
 

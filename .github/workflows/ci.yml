@@ -7,33 +7,33 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
-    # Using ubuntu-latest as it's the CI environment, actual deployment is on Debian 13
+  ci:
     runs-on: ubuntu-latest
-
     strategy:
+      fail-fast: false
       matrix:
-        # Matching production environment (Debian 13) which supports Node.js 18.x and 20.x
-        node-version: [18.x, 20.x]
+        include:
+          - task: test
+            node-version: 18.x
+          - task: test
+            node-version: 20.x
+          - task: lint
+            node-version: 20.x
 
     steps:
-    - uses: actions/checkout@v3
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v3
-      with:
-        node-version: ${{ matrix.node-version }}
-    - run: npm install
-    - run: npm test
-    
-  lint:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    - name: Use Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '20.x'
-    - run: npm install
-    - run: npm run lint
+      - uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm install
+      - name: Run tests
+        if: matrix.task == 'test'
+        run: npm test
+      - name: Run lint
+        if: matrix.task == 'lint'
+        run: npm run lint
 

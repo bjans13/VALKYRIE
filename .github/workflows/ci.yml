@@ -22,11 +22,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - name: Detect npm cache eligibility
+        id: cache-detect
+        shell: bash
+        run: |
+          if [[ -f package-lock.json ]]; then
+            echo "cache=npm" >> "$GITHUB_OUTPUT"
+          fi
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
+          cache: ${{ steps.cache-detect.outputs.cache }}
       - name: Install dependencies
         run: npm install
       - name: Run tests

@@ -3,6 +3,10 @@
 Designation: V.A.L.K.Y.R.I.E.
 (Virtual Administration and Logistics Kernel for Realm Instances and Environments)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+[![Node.js 18+](https://img.shields.io/badge/Node.js-%E2%89%A518-brightgreen.svg)](https://nodejs.org/)
+[![Tests](https://github.com/bjans13/VALKYRIE/actions/workflows/ci.yml/badge.svg)](https://github.com/bjans13/VALKYRIE/actions)
+
 V.A.L.K.Y.R.I.E. is a Discord bot that coordinates management tasks for Terraria and Minecraft servers. The bot provides
 role-gated commands for checking server status, starting and stopping services, and sharing connection details with trusted
 players.
@@ -39,13 +43,13 @@ I am that guardian."
 
 - Node.js 18+ (tested with Node.js 20 LTS)
 - Access credentials for the managed game servers
-- Discord bot token with the Message Content intent enabled
+- Discord bot token with the default **Server Members Intent** disabled (only non-privileged intents are required)
 
 ## Self-Host Quickstart
 
 1. **Create a Discord application.** Visit the [Discord Developer Portal](https://discord.com/developers/applications), create a new application, and add a Bot user.
 2. **Configure bot privileges.**
-   - Enable the **SERVER MEMBERS INTENT** and **MESSAGE CONTENT INTENT** toggles to match the runtime configuration.
+   - Leave privileged toggles (**Server Members Intent** and **Message Content Intent**) **disabled**. VALKYRIE only consumes interaction events.
    - Regenerate a bot token and store it as `DISCORD_TOKEN` in your `.env` file.
    - Create an invite URL with the `bot` and `applications.commands` scopes plus minimal permissions (`Send Messages`, `Embed Links`, `Read Message History`).
 3. **Allow only trusted guilds.** Populate `ALLOWED_GUILDS` in `.env` with the server IDs that may host VALKYRIE and set `OWNER` to the Discord user ID that should receive security alerts.
@@ -126,3 +130,16 @@ Mount your SSH keys into the `.ssh/` directory next to `docker-compose.yml` befo
 
 The actionable remediation items live in [`IMPROVEMENT_PLAN.md`](./IMPROVEMENT_PLAN.md). Consult that document when planning
 future enhancements.
+
+## Governance & Project Resources
+
+- [Contributing Guidelines](./CONTRIBUTING.md)
+- [Code of Conduct](./CODE_OF_CONDUCT.md)
+- [Security Policy](./SECURITY.md)
+- [Improvement Plan](./IMPROVEMENT_PLAN.md)
+- [Changelog](./CHANGELOG.md)
+
+## Release Checklist
+
+Before publishing a new version (or tagging a public release), work through the
+[release checklist](./RELEASE_CHECKLIST.md) to ensure documentation, version numbers, and automation stay in sync.

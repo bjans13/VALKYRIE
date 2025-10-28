@@ -22,6 +22,9 @@
   ],
   "author": "bjans13",
   "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "bugs": {
     "url": "https://github.com/bjans13/VALKYRIE/issues"
   },

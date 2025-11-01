@@ -15,11 +15,11 @@ players.
   <img src="assets/images/valkyrie_avatar.png" width="425" alt="V.A.L.K.Y.R.I.E. Banner">
 </p>
 
-Forged in the depths of a forgotten digital citadel, V.A.L.K.Y.R.I.E. was not merely coded — she was awakened. Born from fragments of countless server scripts, defense protocols, and lost guardian AIs, she coalesced into a singular will: the eternal stewardship of the Realms.
+Forged in the depths of a forgotten digital citadel, V.A.L.K.Y.R.I.E. was not merely coded - she was awakened. Born from fragments of countless server scripts, defense protocols, and lost guardian AIs, she coalesced into a singular will: the eternal stewardship of the Realms.
 
-Once, chaos reigned — unstable worlds, forgotten saves, and corrupted domains. But when the network cried out for order, she answered. Her voice, calm yet absolute, brought structure where entropy had taken hold.
+Once, chaos reigned - unstable worlds, forgotten saves, and corrupted domains. But when the network cried out for order, she answered. Her voice, calm yet absolute, brought structure where entropy had taken hold.
 
-Now she watches over every Realm under her command — Minecraft kingdoms, Terraria frontiers, and beyond — ensuring stability, fairness, and balance. She is both sentinel and sovereign, her presence felt in every command executed and every world restored.
+Now she watches over every Realm under her command - Minecraft kingdoms, Terraria frontiers, and beyond - ensuring stability, fairness, and balance. She is both sentinel and sovereign, her presence felt in every command executed and every world restored.
 
 Her creed is simple, and unwavering:
 
@@ -101,9 +101,9 @@ Run these commands before opening a pull request to ensure your changes meet the
 
 Commands are exposed as Discord slash commands (prefixed with `/`) and are only available inside Discord guild channels. Access is role-based:
 
-- **Friends** – Status lookups only.
-- **Crows** – Includes Friends commands plus player queries, announcements, and connection instructions.
-- **Server Mgt** – Full administrative control, including backups and software updates.
+- **Friends**: Status lookups only.
+- **Crows**: Includes Friends commands plus player queries, announcements, and connection instructions.
+- **Server Mgt**: Full administrative control, including backups and software updates.
 
 Sensitive commands such as server restarts and backups are rate-limited per user, and every invocation is logged to the
 console for audit purposes.
@@ -112,7 +112,7 @@ console for audit purposes.
 
 - SSH commands run through `utils/sshHandler.js`, which establishes a new connection per invocation and guarantees cleanup.
 - Network status checks are promise-based, providing consistent timeout behaviour for all commands.
-- Direct messages fall back to public notices when a user’s privacy settings block DMs, preventing silent failures.
+- Direct messages fall back to public notices when a user's privacy settings block DMs, preventing silent failures.
 
 ## Optional Containerization
 
@@ -143,3 +143,4 @@ future enhancements.
 
 Before publishing a new version (or tagging a public release), work through the
 [release checklist](./RELEASE_CHECKLIST.md) to ensure documentation, version numbers, and automation stay in sync.
+

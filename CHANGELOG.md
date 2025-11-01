@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+## [1.0.1] - 2025-11-01
+
 ### Added
 - Documentation polish and metadata updates.
 
@@ -14,20 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clarified installation instructions and container usage notes.
 - Updated documentation to reflect the slash command (`/`) prefix.
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 - Corrected dependency guidance for the SSH handler utility.
 
-### Security
-
-## [1.0.0] - TBD
+## [1.0.0] - 2025-10-26
 
 ### Added
 - Initial project scaffolding for the VALKYRIE Discord bot.
 - SSH handling utilities for remote server orchestration.
 - Baseline project documentation and community health files.
 
+[Unreleased]: https://github.com/bjans13/VALKYRIE/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/bjans13/VALKYRIE/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/bjans13/VALKYRIE/releases/tag/v1.0.0

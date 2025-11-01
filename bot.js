@@ -8,6 +8,7 @@ const {
     ApplicationCommandOptionType,
     ApplicationCommandType,
     Events,
+    MessageFlags,
 } = require('discord.js');
 const net = require('net');
 const fs = require('fs');
@@ -138,32 +139,94 @@ function checkRateLimit(userId, commandKey) {
     return false;
 }
 
-async function respond(interaction, content, options = {}) {
-    if (typeof content === 'object' && content !== null) {
-        if (interaction.deferred || interaction.replied) {
-            return interaction.followUp(content);
-        }
-        return interaction.reply(content);
+function prepareInteractionPayload(content, options = {}) {
+    const basePayload =
+        typeof content === 'object' && content !== null ? { ...content } : { content, ...options };
+
+    if (!basePayload || typeof basePayload !== 'object') {
+        return { raw: basePayload, reply: basePayload };
     }
 
-    const payload = { content, ...options };
-    if (interaction.deferred || interaction.replied) {
-        return interaction.followUp(payload);
+    if (!Object.prototype.hasOwnProperty.call(basePayload, 'ephemeral')) {
+        return { raw: basePayload, reply: basePayload };
     }
-    return interaction.reply(payload);
+
+    const { ephemeral, ...rest } = basePayload;
+
+    if (!ephemeral) {
+        return { raw: rest, reply: rest };
+    }
+
+    const baseFlags = rest.flags ?? 0;
+    return {
+        raw: rest,
+        reply: {
+            ...rest,
+            flags: baseFlags | MessageFlags.Ephemeral,
+        },
+    };
 }
 
+async function respond(interaction, content, options = {}) {
+    const { raw, reply } = prepareInteractionPayload(content, options);
+
+    if (interaction.deferred && !interaction.replied) {
+        return interaction.editReply(raw);
+    }
+
+    if (interaction.replied) {
+        return interaction.followUp(reply);
+    }
+
+    return interaction.reply(reply);
+}
+
+const dmNoticeHandledInteractions = new WeakSet();
+
 async function sendDirectMessageWithNotice(interaction, content) {
+    if (dmNoticeHandledInteractions.has(interaction)) {
+        logger.debug('DM notice already handled for interaction', {
+            command: interaction.commandName,
+            userId: interaction.user.id,
+        });
+        return;
+    }
+
+    dmNoticeHandledInteractions.add(interaction);
+
+    if (!interaction.deferred && !interaction.replied) {
+        try {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        } catch (error) {
+            logger.warn('Failed to defer interaction before sending DM.', { error });
+        }
+    }
+
+    let dmError = null;
     try {
         await interaction.user.send(content);
-        await respond(interaction, 'I sent you a DM with the requested information.', { ephemeral: true });
     } catch (error) {
-        logger.warn(`Failed to DM ${interaction.user.tag}: ${error.message}`);
+        dmError = error;
+    }
+
+    if (!dmError) {
+        try {
+            await respond(interaction, 'I sent you a DM with the requested information.', { ephemeral: true });
+        } catch (responseError) {
+            logger.error('Failed to confirm DM delivery to interaction.', { error: responseError });
+        }
+        return;
+    }
+
+    logger.warn(`Failed to DM ${interaction.user.tag}: ${dmError.message}`);
+    try {
         await respond(
             interaction,
             'I could not send you a DM. Please make sure your privacy settings allow messages from server members.',
             { ephemeral: true }
         );
+    } catch (responseError) {
+        logger.error('Failed to notify interaction about DM failure.', { error: responseError });
     }
 }
 
@@ -320,14 +383,19 @@ registerCommand({
     category: 'Terraria',
     minRole: 1,
     handler: async (interaction) => {
-        await respond(interaction, 'Checking Terraria server status...');
-        const online = await isServerOnline(config.terraria.host, config.terraria.port);
-        await respond(
-            interaction,
-            online
-                ? 'Terraria server is currently online and connectable!'
-                : 'Terraria server is currently offline.'
-        );
+        await interaction.deferReply();
+
+        try {
+            const online = await isServerOnline(config.terraria.host, config.terraria.port);
+            await interaction.editReply(
+                online
+                    ? 'Terraria server is currently online and connectable!'
+                    : 'Terraria server is currently offline.'
+            );
+        } catch (error) {
+            logger.error('Failed to check Terraria server status', { error });
+            await interaction.editReply('Failed to check Terraria server status.');
+        }
     },
 });
 
@@ -887,10 +955,7 @@ client.on('interactionCreate', async (interaction) => {
 
     if (!command) {
         if (!interaction.deferred && !interaction.replied) {
-            await interaction.reply({
-                content: 'This command is not available right now.',
-                ephemeral: true,
-            });
+            await respond(interaction, 'This command is not available right now.', { ephemeral: true });
         }
         return;
     }
@@ -919,16 +984,12 @@ client.on('interactionCreate', async (interaction) => {
         await command.handler(interaction);
     } catch (error) {
         logger.error(`Unexpected error while executing /${interaction.commandName}`, { error });
-        if (interaction.deferred || interaction.replied) {
-            await interaction.followUp({
-                content: 'An unexpected error occurred while processing your command.',
+        try {
+            await respond(interaction, 'An unexpected error occurred while processing your command.', {
                 ephemeral: true,
             });
-        } else {
-            await interaction.reply({
-                content: 'An unexpected error occurred while processing your command.',
-                ephemeral: true,
-            });
+        } catch (responseError) {
+            logger.error('Failed to send error notification to interaction.', { error: responseError });
         }
     }
 });

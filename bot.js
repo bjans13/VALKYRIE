@@ -181,7 +181,19 @@ async function respond(interaction, content, options = {}) {
     return interaction.reply(reply);
 }
 
+const dmNoticeHandledInteractions = new WeakSet();
+
 async function sendDirectMessageWithNotice(interaction, content) {
+    if (dmNoticeHandledInteractions.has(interaction)) {
+        logger.debug('DM notice already handled for interaction', {
+            command: interaction.commandName,
+            userId: interaction.user.id,
+        });
+        return;
+    }
+
+    dmNoticeHandledInteractions.add(interaction);
+
     if (!interaction.deferred && !interaction.replied) {
         try {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -199,7 +211,7 @@ async function sendDirectMessageWithNotice(interaction, content) {
 
     if (!dmError) {
         try {
-            await respond(interaction, 'I sent you a DM with the requested information.');
+            await respond(interaction, 'I sent you a DM with the requested information.', { ephemeral: true });
         } catch (responseError) {
             logger.error('Failed to confirm DM delivery to interaction.', { error: responseError });
         }
@@ -210,7 +222,8 @@ async function sendDirectMessageWithNotice(interaction, content) {
     try {
         await respond(
             interaction,
-            'I could not send you a DM. Please make sure your privacy settings allow messages from server members.'
+            'I could not send you a DM. Please make sure your privacy settings allow messages from server members.',
+            { ephemeral: true }
         );
     } catch (responseError) {
         logger.error('Failed to notify interaction about DM failure.', { error: responseError });

@@ -8,6 +8,7 @@ const {
     ApplicationCommandOptionType,
     ApplicationCommandType,
     Events,
+    MessageFlags,
 } = require('discord.js');
 const net = require('net');
 const fs = require('fs');
@@ -138,19 +139,46 @@ function checkRateLimit(userId, commandKey) {
     return false;
 }
 
-async function respond(interaction, content, options = {}) {
-    if (typeof content === 'object' && content !== null) {
-        if (interaction.deferred || interaction.replied) {
-            return interaction.followUp(content);
-        }
-        return interaction.reply(content);
+function prepareInteractionPayload(content, options = {}) {
+    const basePayload =
+        typeof content === 'object' && content !== null ? { ...content } : { content, ...options };
+
+    if (!basePayload || typeof basePayload !== 'object') {
+        return { raw: basePayload, reply: basePayload };
     }
 
-    const payload = { content, ...options };
-    if (interaction.deferred || interaction.replied) {
-        return interaction.followUp(payload);
+    if (!Object.prototype.hasOwnProperty.call(basePayload, 'ephemeral')) {
+        return { raw: basePayload, reply: basePayload };
     }
-    return interaction.reply(payload);
+
+    const { ephemeral, ...rest } = basePayload;
+
+    if (!ephemeral) {
+        return { raw: rest, reply: rest };
+    }
+
+    const baseFlags = rest.flags ?? 0;
+    return {
+        raw: rest,
+        reply: {
+            ...rest,
+            flags: baseFlags | MessageFlags.Ephemeral,
+        },
+    };
+}
+
+async function respond(interaction, content, options = {}) {
+    const { raw, reply } = prepareInteractionPayload(content, options);
+
+    if (interaction.deferred && !interaction.replied) {
+        return interaction.editReply(raw);
+    }
+
+    if (interaction.replied) {
+        return interaction.followUp(reply);
+    }
+
+    return interaction.reply(reply);
 }
 
 async function sendDirectMessageWithNotice(interaction, content) {
@@ -320,14 +348,19 @@ registerCommand({
     category: 'Terraria',
     minRole: 1,
     handler: async (interaction) => {
-        await respond(interaction, 'Checking Terraria server status...');
-        const online = await isServerOnline(config.terraria.host, config.terraria.port);
-        await respond(
-            interaction,
-            online
-                ? 'Terraria server is currently online and connectable!'
-                : 'Terraria server is currently offline.'
-        );
+        await interaction.deferReply();
+
+        try {
+            const online = await isServerOnline(config.terraria.host, config.terraria.port);
+            await interaction.editReply(
+                online
+                    ? 'Terraria server is currently online and connectable!'
+                    : 'Terraria server is currently offline.'
+            );
+        } catch (error) {
+            logger.error('Failed to check Terraria server status', { error });
+            await interaction.editReply('Failed to check Terraria server status.');
+        }
     },
 });
 
@@ -887,10 +920,7 @@ client.on('interactionCreate', async (interaction) => {
 
     if (!command) {
         if (!interaction.deferred && !interaction.replied) {
-            await interaction.reply({
-                content: 'This command is not available right now.',
-                ephemeral: true,
-            });
+            await respond(interaction, 'This command is not available right now.', { ephemeral: true });
         }
         return;
     }
@@ -919,16 +949,12 @@ client.on('interactionCreate', async (interaction) => {
         await command.handler(interaction);
     } catch (error) {
         logger.error(`Unexpected error while executing /${interaction.commandName}`, { error });
-        if (interaction.deferred || interaction.replied) {
-            await interaction.followUp({
-                content: 'An unexpected error occurred while processing your command.',
+        try {
+            await respond(interaction, 'An unexpected error occurred while processing your command.', {
                 ephemeral: true,
             });
-        } else {
-            await interaction.reply({
-                content: 'An unexpected error occurred while processing your command.',
-                ephemeral: true,
-            });
+        } catch (responseError) {
+            logger.error('Failed to send error notification to interaction.', { error: responseError });
         }
     }
 });

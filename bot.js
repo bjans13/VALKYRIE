@@ -182,16 +182,38 @@ async function respond(interaction, content, options = {}) {
 }
 
 async function sendDirectMessageWithNotice(interaction, content) {
+    if (!interaction.deferred && !interaction.replied) {
+        try {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        } catch (error) {
+            logger.warn('Failed to defer interaction before sending DM.', { error });
+        }
+    }
+
+    let dmError = null;
     try {
         await interaction.user.send(content);
-        await respond(interaction, 'I sent you a DM with the requested information.', { ephemeral: true });
     } catch (error) {
-        logger.warn(`Failed to DM ${interaction.user.tag}: ${error.message}`);
+        dmError = error;
+    }
+
+    if (!dmError) {
+        try {
+            await respond(interaction, 'I sent you a DM with the requested information.');
+        } catch (responseError) {
+            logger.error('Failed to confirm DM delivery to interaction.', { error: responseError });
+        }
+        return;
+    }
+
+    logger.warn(`Failed to DM ${interaction.user.tag}: ${dmError.message}`);
+    try {
         await respond(
             interaction,
-            'I could not send you a DM. Please make sure your privacy settings allow messages from server members.',
-            { ephemeral: true }
+            'I could not send you a DM. Please make sure your privacy settings allow messages from server members.'
         );
+    } catch (responseError) {
+        logger.error('Failed to notify interaction about DM failure.', { error: responseError });
     }
 }
 

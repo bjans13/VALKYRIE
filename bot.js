@@ -7,6 +7,7 @@ const {
     ContextMenuCommandBuilder,
     ApplicationCommandOptionType,
     ApplicationCommandType,
+    Events,
 } = require('discord.js');
 const net = require('net');
 const fs = require('fs');
@@ -93,7 +94,7 @@ const client = new Client({
     ],
 });
 
-client.once('ready', async () => {
+client.once(Events.ClientReady, async () => {
     logger.info('Bot connected as %s', client.user.tag);
     try {
         await getOwnerUser(client);

@@ -7,86 +7,21 @@ const {
     ContextMenuCommandBuilder,
     ApplicationCommandOptionType,
     ApplicationCommandType,
+    Events,
 } = require('discord.js');
 const net = require('net');
 const fs = require('fs');
 const { setTimeout: delay } = require('timers/promises');
+const config = require('./config');
+const logger = require('./utils/logger');
 const { withSSHConnection, runSSHCommand } = require('./utils/sshHandler');
-require('dotenv').config();
-
-const REQUIRED_ENV_VARS = [
-    'DISCORD_TOKEN',
-    'ALLOWED_GUILDS',
-    'OWNER',
-    'TERRARIA_GAME_SERVER_IP',
-    'TERRARIA_SSH_USER',
-    'TERRARIA_SSH_PRIVATE_KEY_PATH',
-    'TERRARIA_PUBLIC_IP',
-    'TERRARIA_PORT',
-    'TERRARIA_PASS',
-    'MINECRAFT_GAME_SERVER_IP',
-    'MINECRAFT_SSH_USER',
-    'MINECRAFT_SSH_PRIVATE_KEY_PATH',
-    'MINECRAFT_PUBLIC_IP',
-    'MINECRAFT_PORT',
-    'MINECRAFT_PASS',
-];
-
-const missingEnv = REQUIRED_ENV_VARS.filter((key) => !process.env[key]);
-if (missingEnv.length > 0) {
-    throw new Error(`Missing required environment variables: ${missingEnv.join(', ')}`);
-}
-
-const allowedGuilds = (process.env.ALLOWED_GUILDS || '')
-    .split(',')
-    .map((id) => id.trim())
-    .filter(Boolean);
-
-if (allowedGuilds.length === 0) {
-    throw new Error('ALLOWED_GUILDS must specify at least one guild ID.');
-}
-
-for (const guildId of allowedGuilds) {
-    if (!/^\d+$/.test(guildId)) {
-        throw new Error(`Invalid guild ID in ALLOWED_GUILDS: ${guildId}`);
-    }
-}
-
-const ownerId = process.env.OWNER.trim();
-if (!/^\d+$/.test(ownerId)) {
-    throw new Error('OWNER must be set to a numeric Discord user ID.');
-}
-
-const config = {
-    discordToken: process.env.DISCORD_TOKEN,
-    allowedGuilds,
-    ownerId,
-    terraria: {
-        host: process.env.TERRARIA_GAME_SERVER_IP,
-        username: process.env.TERRARIA_SSH_USER,
-        privateKeyPath: process.env.TERRARIA_SSH_PRIVATE_KEY_PATH,
-        publicIp: process.env.TERRARIA_PUBLIC_IP,
-        port: Number(process.env.TERRARIA_PORT),
-        password: process.env.TERRARIA_PASS,
-    },
-    minecraft: {
-        host: process.env.MINECRAFT_GAME_SERVER_IP,
-        username: process.env.MINECRAFT_SSH_USER,
-        privateKeyPath: process.env.MINECRAFT_SSH_PRIVATE_KEY_PATH,
-        publicIp: process.env.MINECRAFT_PUBLIC_IP,
-        port: Number(process.env.MINECRAFT_PORT),
-        password: process.env.MINECRAFT_PASS,
-    },
-};
-
-if (Number.isNaN(config.terraria.port) || Number.isNaN(config.minecraft.port)) {
-    throw new Error('TERRARIA_PORT and MINECRAFT_PORT must be valid numbers.');
-}
 
 validateFilesystemPrerequisites([
     { name: 'Terraria', keyPath: config.terraria.privateKeyPath },
     { name: 'Minecraft', keyPath: config.minecraft.privateKeyPath },
 ]);
+
+logger.info('Starting Valkyrie bot', { environment: config.environment.name });
 
 let ownerUser = null;
 const unauthorizedGuildNotices = new Set();
@@ -108,7 +43,7 @@ async function getOwnerUser(clientInstance) {
         ownerUser = await clientInstance.users.fetch(config.ownerId);
         return ownerUser;
     } catch (error) {
-        console.error('Failed to fetch owner user for alerts:', error);
+        logger.error('Failed to fetch owner user for alerts', { error });
         return null;
     }
 }
@@ -122,13 +57,13 @@ async function alertOwner(clientInstance, message) {
     try {
         await owner.send(message);
     } catch (error) {
-        console.error('Failed to send alert to owner:', error);
+        logger.error('Failed to send alert to owner', { error });
     }
 }
 
 async function reportUnauthorizedGuild(clientInstance, guildId, context, guildName = 'Unknown') {
     const label = guildId ? `${guildName} (${guildId})` : guildName;
-    console.warn(`[SECURITY] ${context}: unauthorized guild ${label}.`);
+    logger.warn(`[SECURITY] ${context}: unauthorized guild ${label}.`);
 
     if (guildId && !unauthorizedGuildNotices.has(guildId)) {
         unauthorizedGuildNotices.add(guildId);
@@ -159,18 +94,18 @@ const client = new Client({
     ],
 });
 
-client.once('ready', async () => {
-    console.log(`Bot connected as ${client.user.tag}`);
+client.once(Events.ClientReady, async () => {
+    logger.info('Bot connected as %s', client.user.tag);
     try {
         await getOwnerUser(client);
     } catch (error) {
-        console.error('Unable to resolve owner user during startup:', error);
+        logger.error('Unable to resolve owner user during startup', { error });
     }
 
     try {
         await registerSlashCommands(client);
     } catch (error) {
-        console.error('Failed to register slash commands via REST:', error);
+        logger.error('Failed to register slash commands via REST', { error });
     }
 
     for (const guild of client.guilds.cache.values()) {
@@ -223,7 +158,7 @@ async function sendDirectMessageWithNotice(interaction, content) {
         await interaction.user.send(content);
         await respond(interaction, 'I sent you a DM with the requested information.', { ephemeral: true });
     } catch (error) {
-        console.warn(`Failed to DM ${interaction.user.tag}:`, error.message);
+        logger.warn(`Failed to DM ${interaction.user.tag}: ${error.message}`);
         await respond(
             interaction,
             'I could not send you a DM. Please make sure your privacy settings allow messages from server members.',
@@ -306,7 +241,7 @@ function logPrivilegedCommand(interaction, commandKey) {
         },
     };
 
-    console.log(JSON.stringify(logEntry));
+    logger.info({ message: 'Privileged command executed', ...logEntry });
 }
 
 function getCommandKey(name, type = ApplicationCommandType.ChatInput) {
@@ -423,7 +358,7 @@ registerCommand({
 
             await respond(interaction, `Currently connected players:\n${players}`);
         } catch (error) {
-            console.error('Failed to fetch player list:', error);
+            logger.error('Failed to fetch player list', { error });
             await respond(interaction, 'Failed to fetch player list.');
         }
     },
@@ -456,7 +391,7 @@ registerCommand({
             });
             await respond(interaction, `Announcement delivered: ${announcement}`);
         } catch (error) {
-            console.error('Failed to send announcement:', error);
+            logger.error('Failed to send announcement', { error });
             await respond(interaction, 'Failed to send announcement to players.');
         }
     },
@@ -491,7 +426,7 @@ registerCommand({
             const status = result.stdout.trim() || result.stderr.trim();
             await respond(interaction, `Minecraft server status: ${status}`);
         } catch (error) {
-            console.error('Failed to check Minecraft server status:', error);
+            logger.error('Failed to check Minecraft server status', { error });
             await respond(interaction, 'Failed to check Minecraft server status.');
         }
     },
@@ -539,11 +474,11 @@ registerCommand({
                             : 'Failed to verify if Terraria server started.'
                     );
                 } catch (verificationError) {
-                    console.error('Failed to verify Terraria server status:', verificationError);
+                    logger.error('Failed to verify Terraria server status', { error: verificationError });
                 }
             }, 10_000);
         } catch (error) {
-            console.error('Failed to start Terraria server:', error);
+            logger.error('Failed to start Terraria server', { error });
             await respond(interaction, 'Failed to start Terraria server.');
         }
     },
@@ -562,7 +497,7 @@ registerCommand({
             await withSSHConnection(config.terraria, (client) => client.execCommand('screen -S terraria -X quit'));
             await respond(interaction, 'Terraria server stopped.');
         } catch (error) {
-            console.error('Failed to stop Terraria server:', error);
+            logger.error('Failed to stop Terraria server', { error });
             await respond(interaction, 'Failed to stop Terraria server.');
         }
     },
@@ -583,7 +518,7 @@ registerCommand({
                 await withSSHConnection(config.terraria, (client) => client.execCommand('screen -S terraria -X quit'));
                 await respond(interaction, 'Terraria server stopped.');
             } catch (error) {
-                console.error('Failed to stop Terraria server:', error);
+                logger.error('Failed to stop Terraria server', { error });
                 await respond(interaction, 'Failed to stop Terraria server.');
             }
         }, 60_000);
@@ -618,11 +553,11 @@ registerCommand({
                             : 'Failed to verify if Terraria server restarted.'
                     );
                 } catch (verificationError) {
-                    console.error('Failed to verify Terraria server restart status:', verificationError);
+                    logger.error('Failed to verify Terraria server restart status', { error: verificationError });
                 }
             }, 10_000);
         } catch (error) {
-            console.error('Failed to restart Terraria server:', error);
+            logger.error('Failed to restart Terraria server', { error });
             await respond(interaction, 'Failed to restart Terraria server.');
         }
     },
@@ -645,7 +580,7 @@ registerCommand({
             const uptime = result.stdout ? result.stdout.split(/\s+/)[1] : 'Unable to determine uptime.';
             await respond(interaction, `Server uptime: ${uptime}`);
         } catch (error) {
-            console.error('Failed to fetch server uptime:', error);
+            logger.error('Failed to fetch server uptime', { error });
             await respond(interaction, 'Failed to fetch server uptime.');
         }
     },
@@ -664,7 +599,7 @@ registerCommand({
             await runSSHCommand(config.minecraft, 'sudo systemctl start minecraft');
             await respond(interaction, 'Minecraft server started.');
         } catch (error) {
-            console.error('Failed to start Minecraft server:', error);
+            logger.error('Failed to start Minecraft server', { error });
             await respond(interaction, 'Failed to start Minecraft server.');
         }
     },
@@ -683,7 +618,7 @@ registerCommand({
             await runSSHCommand(config.minecraft, 'sudo systemctl stop minecraft');
             await respond(interaction, 'Minecraft server stopped.');
         } catch (error) {
-            console.error('Failed to stop Minecraft server:', error);
+            logger.error('Failed to stop Minecraft server', { error });
             await respond(interaction, 'Failed to stop Minecraft server.');
         }
     },
@@ -702,7 +637,7 @@ registerCommand({
             await runSSHCommand(config.minecraft, 'sudo systemctl restart minecraft');
             await respond(interaction, 'Minecraft server restarted.');
         } catch (error) {
-            console.error('Failed to restart Minecraft server:', error);
+            logger.error('Failed to restart Minecraft server', { error });
             await respond(interaction, 'Failed to restart Minecraft server.');
         }
     },
@@ -721,7 +656,7 @@ registerCommand({
             await runSSHCommand(config.minecraft, 'sudo /minecraft/backup.sh');
             await respond(interaction, 'Minecraft backup completed.');
         } catch (error) {
-            console.error('Failed to backup Minecraft server:', error);
+            logger.error('Failed to backup Minecraft server', { error });
             await respond(interaction, 'Failed to backup Minecraft server.');
         }
     },
@@ -740,7 +675,7 @@ registerCommand({
             await runSSHCommand(config.minecraft, 'sudo /minecraft/update.sh');
             await respond(interaction, 'Minecraft update completed.');
         } catch (error) {
-            console.error('Failed to update Minecraft server:', error);
+            logger.error('Failed to update Minecraft server', { error });
             await respond(interaction, 'Failed to update Minecraft server.');
         }
     },
@@ -759,7 +694,7 @@ registerCommand({
             await runSSHCommand(config.minecraft, 'sudo /minecraft/restore.sh');
             await respond(interaction, 'Minecraft restore completed.');
         } catch (error) {
-            console.error('Failed to restore Minecraft server:', error);
+            logger.error('Failed to restore Minecraft server', { error });
             await respond(interaction, 'Failed to restore Minecraft server.');
         }
     },
@@ -801,7 +736,7 @@ registerCommand({
             await runSSHCommand(config.minecraft, command);
             await respond(interaction, `Minecraft Bedrock download link updated to version ${patch}.`);
         } catch (error) {
-            console.error('Failed to update Minecraft download link:', error);
+            logger.error('Failed to update Minecraft download link', { error });
             await respond(
                 interaction,
                 'Failed to update the download link due to insufficient permissions or other errors.'
@@ -909,7 +844,7 @@ async function registerSlashCommands(clientInstance) {
                 { body }
             );
         } catch (error) {
-            console.error(`Failed to register commands for guild ${guild.id}:`, error);
+            logger.error(`Failed to register commands for guild ${guild.id}`, { error });
         }
     }
 }
@@ -983,7 +918,7 @@ client.on('interactionCreate', async (interaction) => {
         logPrivilegedCommand(interaction, command.legacyKey);
         await command.handler(interaction);
     } catch (error) {
-        console.error(`Unexpected error while executing /${interaction.commandName}:`, error);
+        logger.error(`Unexpected error while executing /${interaction.commandName}`, { error });
         if (interaction.deferred || interaction.replied) {
             await interaction.followUp({
                 content: 'An unexpected error occurred while processing your command.',

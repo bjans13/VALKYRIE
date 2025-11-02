@@ -8,6 +8,8 @@ Designation: V.A.L.K.Y.R.I.E.
 [![Tests](https://github.com/bjans13/VALKYRIE/actions/workflows/ci.yml/badge.svg)](https://github.com/bjans13/VALKYRIE/actions)
 [![Version](https://img.shields.io/github/package-json/v/bjans13/VALKYRIE)](./package.json)
 [![discord.js 14.x](https://img.shields.io/badge/discord.js-14.x-5865F2?logo=discord&logoColor=white)](https://discord.js.org/#/)
+[![Debian 13 LXC](https://img.shields.io/badge/Tested%20on-Debian%2013%20LXC-A81D33?logo=debian&logoColor=white)](https://www.debian.org/releases/trixie/)
+[![Proxmox VE 9](https://img.shields.io/badge/Platform-Proxmox%20VE%209-E57000?logo=proxmox&logoColor=white)](https://www.proxmox.com/en/proxmox-ve)
 
 V.A.L.K.Y.R.I.E. is a Discord bot that coordinates management tasks for Terraria and Minecraft servers. The bot provides
 role-gated commands for checking server status, starting and stopping services, and sharing connection details with trusted

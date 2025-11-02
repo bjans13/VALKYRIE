@@ -10,7 +10,7 @@ Use this checklist before publishing a public release or Git tag.
    - Update the release entry in [`CHANGELOG.md`](./CHANGELOG.md) with the version and release date.
 3. **Verify configuration**
    - Validate `.env.example` for accuracy and remove any unused variables.
-   - Confirm [`README.md`](./README.md) and other top-level docs reflect current features.
+   - Confirm [`README.md`](./README.md), [`AGENT.md`](./AGENT.md), and other top-level docs reflect current features.
 4. **Quality gates**
    - Run `npm test` and `npm run lint` locally and ensure CI passes.
    - Execute a smoke test of the bot in a staging guild, validating slash command registration.

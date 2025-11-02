@@ -9,7 +9,7 @@
 ## Operating Envelope
 
 - **Guild Gatekeeping:** Only servers listed in `ALLOWED_GUILDS` may interact with the bot. Any unauthorized guild discovery is logged and escalated to the configured `OWNER` Discord ID.
-- **Role Awareness:** User tiers are matched against `ROLE_PRIORITY` (`Friends`, `Crows`, `Server Mgt`) to determine command eligibility (`bot.js:ROLE_PRIORITY`).
+- **Role Awareness:** User tiers are matched against `ROLE_PRIORITY` (`Friends`, `Crows`, `Server Mgt`) to determine command eligibility (`bot.js:ROLE_PRIORITY`). Rename the entries to mirror your Discord role titles (lowest to highest privilege) before deployment so the bot can recognize custom role taxonomies.
 - **Runtime Safeguards:** Filesystem prerequisites for SSH keys are validated at startup, and missing environment variables terminate boot early (`config/default.js`).
 - **Logging Discipline:** Structured logs stream to console by default and can be redirected to files via the `LOG_*` variables (see **Environment Controls**).
 
@@ -22,6 +22,8 @@ Slash commands are registered per allowed guild during startup. Each command exp
 | **Friends** | Read-only observers | `/status_terraria`, `/server` (plus the "Server Command Reference" user context shortcut) |
 | **Crows** | Trusted players & announcers | `/player_list`, `/announce`, `/join_terraria`, `/status_minecraft`, `/join_minecraft` |
 | **Server Mgt** | Infrastructure stewards | `/start_terraria`, `/stop_terraria`, `/stop_terraria_warning`, `/restart_terraria`, `/uptime_terraria`, `/start_minecraft`, `/stop_minecraft`, `/restart_minecraft`, `/backup_minecraft`, `/update_minecraft`, `/restore_minecraft`, `/set_minecraftpatch` |
+
+Minecraft maintenance commands (`/backup_minecraft`, `/restore_minecraft`, `/update_minecraft`, `/set_minecraftpatch`) invoke hardened shell scripts maintained in [bjans13/minecraftserverscripts](https://github.com/bjans13/minecraftserverscripts).
 
 ### Interaction Behaviors
 
@@ -48,7 +50,7 @@ Logging overrides (optional):
 1. **Provision Secrets:** Copy `.env.example` to `.env`, supply guild IDs, owner ID, server IPs, ports, passwords, and key paths.
 2. **Install Dependencies:** `npm install`
 3. **Bootstrap Commands:** `npm start` (registers slash commands for every allowed guild and exits on configuration errors).
-4. **Routine Maintenance:** Use `/update_minecraft` and `/set_minecraftpatch` to keep Bedrock servers aligned with upstream releases; `/backup_minecraft` and `/restore_minecraft` drive the accompanying shell scripts.
+4. **Routine Maintenance:** Use `/update_minecraft` and `/set_minecraftpatch` to keep Bedrock servers aligned with upstream releases; `/backup_minecraft` and `/restore_minecraft` drive the accompanying shell scripts sourced from [minecraftserverscripts](https://github.com/bjans13/minecraftserverscripts).
 
 ## Observability and Alerts
 
@@ -70,5 +72,13 @@ Logging overrides (optional):
 - Security posture: `SECURITY.md`
 - Contribution workflow: `CONTRIBUTING.md`
 - Improvement backlog: `IMPROVEMENT_PLAN.md`
+
+## Compliance & Legal
+
+- VALKYRIE ships under the MIT License; include `LICENSE` when redistributing or forking.
+- V.A.L.K.Y.R.I.E. (Virtual Administration and Logistics Kernel for Realm Instances and Environments) (TM) is a trademark of bjans13. Direct trademark or branding inquiries to support@thegrazingllama.com.
+- The bot is unaffiliated with Discord Inc., Mojang Studios/Microsoft, or Re-Logic. Respect each platform's Terms of Service and the licensing requirements for the games you administer.
+- Handling realm automation requires strong operational hygiene: keep SSH keys scoped and rotated, review remote scripts before execution, and notify stakeholders before running destructive maintenance commands.
+- General inquiries: contact@thegrazingllama.com
 
 Keep this dossier updated alongside major behavior changes so operators and contributors share a current understanding of the agent's surface area and responsibilities.

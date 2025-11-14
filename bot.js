@@ -85,6 +85,24 @@ const SENSITIVE_COMMANDS = new Set([
     'update minecraft',
     'restore minecraft',
 ]);
+
+const MINECRAFT_UPDATE_STATUS_LINES = new Set([
+    'No backup found! Update aborted.',
+    'Latest version link not found! Update aborted.',
+    'Stopping server...',
+    'Backing up server...',
+    'Downloading latest version...',
+    'Download failed! Update aborted.',
+    'Extracting new files...',
+    'Ensuring bedrock_server is executable...',
+    'Update complete!',
+    'Restoring settings and worlds...',
+    'Restoration failed! Please check manually.',
+    'No backup found! Restore aborted.',
+    'Restoring worlds, server.properties, and permissions.json from backup...',
+    'Starting server...',
+    'Restore complete!',
+]);
 const COOLDOWN_MS = 30_000;
 const cooldowns = new Map();
 
@@ -738,14 +756,129 @@ registerCommand({
     category: 'Minecraft',
     minRole: 3,
     handler: async (interaction) => {
-        await respond(interaction, 'Updating Minecraft server...');
         try {
-            await runSSHCommand(config.minecraft, 'sudo /minecraft/update.sh');
-            await respond(interaction, 'Minecraft update completed.');
+            await interaction.deferReply();
         } catch (error) {
-            logger.error('Failed to update Minecraft server', { error });
-            await respond(interaction, 'Failed to update Minecraft server.');
+            logger.error('Failed to defer update_minecraft interaction', { error });
+            await respond(interaction, 'Failed to start Minecraft update. Please try again.');
+            return;
         }
+
+        const progressLines = [];
+        let editQueue = Promise.resolve();
+
+        const formatProgressMessage = () => {
+            const header = '**Minecraft Update Progress**';
+            if (progressLines.length === 0) {
+                return `${header}\n(Waiting for script output...)`;
+            }
+
+            return `${header}\n${progressLines.join('\n')}`;
+        };
+
+        const queueProgressEdit = () => {
+            const message = formatProgressMessage();
+            editQueue = editQueue
+                .then(() => interaction.editReply(message))
+                .catch((editError) => {
+                    logger.error('Failed to update Minecraft progress message', { error: editError });
+                });
+            return editQueue;
+        };
+
+        const pushFormattedLine = (line) => {
+            if (!line) {
+                return editQueue;
+            }
+
+            progressLines.push(line);
+            return queueProgressEdit();
+        };
+
+        const formatStatusLine = (rawLine) => {
+            const normalized = rawLine.trim();
+            const lower = normalized.toLowerCase();
+
+            let prefix = '⏳';
+            if (lower.includes('failed') || lower.includes('aborted')) {
+                prefix = '❌';
+            } else if (lower.includes('complete')) {
+                prefix = '✅';
+            }
+
+            return `${prefix} ${normalized}`;
+        };
+
+        const addProgressFromRawLine = (rawLine) => {
+            const normalized = rawLine.replace(/\r/g, '').trim();
+            if (!normalized || !MINECRAFT_UPDATE_STATUS_LINES.has(normalized)) {
+                return;
+            }
+
+            pushFormattedLine(formatStatusLine(normalized));
+        };
+
+        await pushFormattedLine('⏳ Starting Minecraft update...');
+
+        let stdoutBuffer = '';
+        let stderrBuffer = '';
+
+        const handleStdoutChunk = (chunk) => {
+            stdoutBuffer += chunk.toString();
+            let newlineIndex;
+            while ((newlineIndex = stdoutBuffer.indexOf('\n')) !== -1) {
+                const line = stdoutBuffer.slice(0, newlineIndex);
+                stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+                addProgressFromRawLine(line);
+            }
+        };
+
+        const handleStderrChunk = (chunk) => {
+            stderrBuffer += chunk.toString();
+        };
+
+        let commandResult = null;
+
+        try {
+            commandResult = await runSSHCommand(config.minecraft, 'sudo /minecraft/update.sh', {
+                onStdout: handleStdoutChunk,
+                onStderr: handleStderrChunk,
+            });
+        } catch (error) {
+            if (stdoutBuffer) {
+                addProgressFromRawLine(stdoutBuffer);
+                stdoutBuffer = '';
+            }
+
+            logger.error('Failed to execute Minecraft update script', {
+                error,
+                stderr: stderrBuffer,
+            });
+
+            await pushFormattedLine('❌ Failed to execute update script. Please check server logs.');
+            await editQueue;
+            return;
+        }
+
+        if (stdoutBuffer) {
+            addProgressFromRawLine(stdoutBuffer);
+            stdoutBuffer = '';
+        }
+
+        if (commandResult && commandResult.code === 0) {
+            logger.info('Minecraft update script completed successfully.');
+            await pushFormattedLine('✅ Minecraft update finished successfully.');
+        } else {
+            const exitCode = commandResult && typeof commandResult.code === 'number' ? commandResult.code : 'unknown';
+            logger.error('Minecraft update script exited with non-zero status', {
+                code: exitCode,
+                stdout: commandResult ? commandResult.stdout : undefined,
+                stderr: commandResult ? commandResult.stderr ?? stderrBuffer : stderrBuffer,
+            });
+            await pushFormattedLine(`❌ Minecraft update failed (exit code ${exitCode}). Please check server logs.`);
+        }
+
+        await editQueue;
     },
 });
 

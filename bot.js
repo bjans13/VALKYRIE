@@ -766,6 +766,11 @@ registerCommand({
 
         const progressLines = [];
         let editQueue = Promise.resolve();
+        const STATUS_PREFIX = {
+            pending: '\u23f3',
+            failure: '\u274c',
+            success: '\u2705',
+        };
 
         const formatProgressMessage = () => {
             const header = '**Minecraft Update Progress**';
@@ -786,6 +791,28 @@ registerCommand({
             return editQueue;
         };
 
+        const removeHourglassLines = async () => {
+            const filtered = progressLines.filter((line) => !line.startsWith(STATUS_PREFIX.pending));
+            if (filtered.length === progressLines.length) {
+                return;
+            }
+
+            progressLines.splice(0, progressLines.length, ...filtered);
+            await interaction.editReply(formatProgressMessage());
+        };
+
+        const scheduleHourglassCleanup = () => {
+            setTimeout(() => {
+                editQueue = editQueue
+                    .then(() => removeHourglassLines())
+                    .catch((cleanupError) => {
+                        logger.error('Failed to clean up Minecraft progress message after completion', {
+                            error: cleanupError,
+                        });
+                    });
+            }, 60_000);
+        };
+
         const pushFormattedLine = (line) => {
             if (!line) {
                 return editQueue;
@@ -799,11 +826,11 @@ registerCommand({
             const normalized = rawLine.trim();
             const lower = normalized.toLowerCase();
 
-            let prefix = '⏳';
+            let prefix = STATUS_PREFIX.pending;
             if (lower.includes('failed') || lower.includes('aborted')) {
-                prefix = '❌';
+                prefix = STATUS_PREFIX.failure;
             } else if (lower.includes('complete')) {
-                prefix = '✅';
+                prefix = STATUS_PREFIX.success;
             }
 
             return `${prefix} ${normalized}`;
@@ -818,7 +845,7 @@ registerCommand({
             pushFormattedLine(formatStatusLine(normalized));
         };
 
-        await pushFormattedLine('⏳ Starting Minecraft update...');
+        await pushFormattedLine(`${STATUS_PREFIX.pending} Starting Minecraft update...`);
 
         let stdoutBuffer = '';
         let stderrBuffer = '';
@@ -855,7 +882,7 @@ registerCommand({
                 stderr: stderrBuffer,
             });
 
-            await pushFormattedLine('❌ Failed to execute update script. Please check server logs.');
+            await pushFormattedLine(`${STATUS_PREFIX.failure} Failed to execute update script. Please check server logs.`);
             await editQueue;
             return;
         }
@@ -867,7 +894,8 @@ registerCommand({
 
         if (commandResult && commandResult.code === 0) {
             logger.info('Minecraft update script completed successfully.');
-            await pushFormattedLine('✅ Minecraft update finished successfully.');
+            await pushFormattedLine(`${STATUS_PREFIX.success} Minecraft update finished successfully.`);
+            scheduleHourglassCleanup();
         } else {
             const exitCode = commandResult && typeof commandResult.code === 'number' ? commandResult.code : 'unknown';
             logger.error('Minecraft update script exited with non-zero status', {
@@ -875,7 +903,7 @@ registerCommand({
                 stdout: commandResult ? commandResult.stdout : undefined,
                 stderr: commandResult ? commandResult.stderr ?? stderrBuffer : stderrBuffer,
             });
-            await pushFormattedLine(`❌ Minecraft update failed (exit code ${exitCode}). Please check server logs.`);
+            await pushFormattedLine(`${STATUS_PREFIX.failure} Minecraft update failed (exit code ${exitCode}). Please check server logs.`);
         }
 
         await editQueue;
@@ -989,7 +1017,7 @@ async function respondWithServerHelp(interaction) {
             .forEach((command) => {
                 const usageSuffix = command.usage.replace(command.name, '').trim();
                 const usageLine = usageSuffix ? `/${command.name} ${usageSuffix}` : `/${command.name}`;
-                lines.push(`• ${usageLine} — ${command.description}`);
+                lines.push(`\u2022 ${usageLine} \u2014 ${command.description}`);
             });
         lines.push('');
     }

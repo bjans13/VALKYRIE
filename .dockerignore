@@ -10,3 +10,5 @@ yarn-error.log*
 .env.*
 logs/
 coverage/
+.ssh
+.ssh/

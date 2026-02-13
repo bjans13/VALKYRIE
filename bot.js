@@ -283,17 +283,43 @@ async function isServerOnline(host, port, timeout = 5000) {
     });
 }
 
-function getMemberRoleLevel(member) {
-    if (!member || !member.roles) {
-        return 0;
+function shellEscape(value) {
+    return `'${String(value).replace(/'/g, `'"'"'`)}'`;
+}
+
+function getMemberRoleNames(member, guild) {
+    if (!member) {
+        return new Set();
     }
 
-    const roleCache = member.roles.cache ?? new Map();
+    if (member.roles?.cache && typeof member.roles.cache.values === 'function') {
+        return new Set(
+            Array.from(member.roles.cache.values())
+                .map((role) => role?.name)
+                .filter(Boolean)
+        );
+    }
+
+    if (Array.isArray(member.roles) && guild?.roles?.cache && typeof guild.roles.cache.get === 'function') {
+        const names = new Set();
+        for (const roleId of member.roles) {
+            const role = guild.roles.cache.get(roleId);
+            if (role?.name) {
+                names.add(role.name);
+            }
+        }
+        return names;
+    }
+
+    return new Set();
+}
+
+function getMemberRoleLevel(member, guild = null) {
+    const roleNames = getMemberRoleNames(member, guild);
 
     for (let i = ROLE_PRIORITY.length - 1; i >= 0; i -= 1) {
         const roleName = ROLE_PRIORITY[i];
-        const role = roleCache.find((r) => r.name === roleName);
-        if (role) {
+        if (roleNames.has(roleName)) {
             return i + 1;
         }
     }
@@ -347,6 +373,16 @@ function createCommandBuilder(command) {
         for (const option of command.options) {
             if (option.type === ApplicationCommandOptionType.String) {
                 builder.addStringOption((opt) =>
+                    opt
+                        .setName(option.name)
+                        .setDescription(option.description)
+                        .setRequired(Boolean(option.required))
+                );
+                continue;
+            }
+
+            if (option.type === ApplicationCommandOptionType.User) {
+                builder.addUserOption((opt) =>
                     opt
                         .setName(option.name)
                         .setDescription(option.description)
@@ -467,12 +503,14 @@ registerCommand({
     ],
     handler: async (interaction) => {
         const announcement = interaction.options.getString('message', true).trim();
+        const screenPayload = `say ${announcement}\\n`;
+        const escapedScreenPayload = shellEscape(screenPayload);
 
         await respond(interaction, 'Sending announcement to players...');
         try {
             await withSSHConnection(config.terraria, async (client) => {
                 await client.execCommand(
-                    `screen -S terraria -p 0 -X stuff "say ${announcement.replace(/"/g, '\\"')}\\n"`
+                    `screen -S terraria -p 0 -X stuff ${escapedScreenPayload}`
                 );
             });
             await respond(interaction, `Announcement delivered: ${announcement}`);
@@ -976,7 +1014,7 @@ registerCommand({
 
 async function respondWithServerHelp(interaction) {
     const member = interaction.member ?? null;
-    const roleLevel = getMemberRoleLevel(member);
+    const roleLevel = getMemberRoleLevel(member, interaction.guild ?? null);
 
     if (roleLevel === 0) {
         await respond(interaction, 'You do not have the required permissions to use bot commands.', { ephemeral: true });
@@ -1028,6 +1066,73 @@ async function respondWithServerHelp(interaction) {
 
     await respond(interaction, lines.join('\n'), { ephemeral: true });
 }
+
+registerCommand({
+    name: 'team_up',
+    usage: 'team_up [player2] [player3] [player4]',
+    description: 'Roll d20s for you and up to 3 friends to form two teams based on rolls.',
+    category: 'Fun',
+    minRole: 1,
+    options: [
+        {
+            name: 'player2',
+            description: 'Second player',
+            type: ApplicationCommandOptionType.User,
+            required: false,
+        },
+        {
+            name: 'player3',
+            description: 'Third player',
+            type: ApplicationCommandOptionType.User,
+            required: false,
+        },
+        {
+            name: 'player4',
+            description: 'Fourth player',
+            type: ApplicationCommandOptionType.User,
+            required: false,
+        },
+    ],
+    handler: async (interaction) => {
+        const players = [{ user: interaction.user, name: interaction.user.globalName || interaction.user.username }];
+
+        const p2 = interaction.options.getUser('player2');
+        if (p2) players.push({ user: p2, name: p2.globalName || p2.username });
+
+        const p3 = interaction.options.getUser('player3');
+        if (p3) players.push({ user: p3, name: p3.globalName || p3.username });
+
+        const p4 = interaction.options.getUser('player4');
+        if (p4) players.push({ user: p4, name: p4.globalName || p4.username });
+
+        if (players.length < 2) {
+            await respond(interaction, 'You need at least 2 players to team up!');
+            return;
+        }
+
+        // Roll for each player
+        const results = players.map(p => ({
+            ...p,
+            roll: Math.floor(Math.random() * 20) + 1
+        }));
+
+        // Sort descending
+        results.sort((a, b) => b.roll - a.roll);
+
+        // Split into teams
+        const midPoint = Math.ceil(results.length / 2);
+        const team1 = results.slice(0, midPoint);
+        const team2 = results.slice(midPoint);
+
+        const formatTeam = (team) => team.map(p => `**${p.name}** (${p.roll})`).join('\n');
+
+        const message = `🎲 **Team Up Rolls!** 🎲\n\n` +
+            `**Team 1 (High Rollers)**\n${formatTeam(team1)}\n\n` +
+            `**Team 2 (Low Rollers)**\n${formatTeam(team2)}`;
+
+        await respond(interaction, message);
+    },
+});
 
 const serverHelpCommand = {
     name: 'server',
@@ -1123,7 +1228,7 @@ client.on('interactionCreate', async (interaction) => {
 
     if (command.minRole > 0) {
         const member = interaction.member ?? null;
-        const roleLevel = getMemberRoleLevel(member);
+        const roleLevel = getMemberRoleLevel(member, interaction.guild ?? null);
         if (roleLevel < command.minRole) {
             const requiredRoleName = ROLE_PRIORITY[command.minRole - 1] ?? 'required';
             await respond(

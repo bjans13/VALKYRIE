@@ -23,7 +23,7 @@ jest.mock('fs/promises', () => ({
     readFile: jest.fn(() => Promise.resolve('fake-private-key')),
 }));
 
-const { withSSHConnection, runSSHCommand } = require('../utils/sshHandler');
+const { withSSHConnection, runSSHCommand, SSHCommandError } = require('../utils/sshHandler');
 const nodeSshModule = require('node-ssh');
 const fsPromises = require('fs/promises');
 
@@ -85,5 +85,31 @@ describe('runSSHCommand', () => {
         expect(result).toEqual({ stdout: 'listing', stderr: '' });
         expect(nodeSshModule.__mocks.execCommandMock).toHaveBeenCalledWith('ls -la', { cwd: '/srv' });
         expect(nodeSshModule.__mocks.disposeMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws an SSHCommandError when the command exits with a non-zero code', async () => {
+        nodeSshModule.__mocks.execCommandMock.mockResolvedValue({
+            stdout: '',
+            stderr: 'permission denied',
+            code: 1,
+        });
+
+        await expect(runSSHCommand(validConfig, 'sudo systemctl restart minecraft')).rejects.toBeInstanceOf(SSHCommandError);
+        expect(nodeSshModule.__mocks.disposeMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('allows non-zero exit codes when explicitly requested', async () => {
+        nodeSshModule.__mocks.execCommandMock.mockResolvedValue({
+            stdout: 'inactive',
+            stderr: '',
+            code: 3,
+        });
+
+        const result = await runSSHCommand(validConfig, 'systemctl is-active minecraft', {
+            allowNonZeroExitCode: true,
+        });
+
+        expect(result).toEqual({ stdout: 'inactive', stderr: '', code: 3 });
+        expect(nodeSshModule.__mocks.execCommandMock).toHaveBeenCalledWith('systemctl is-active minecraft', {});
     });
 });

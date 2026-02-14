@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const environment = require('./environment');
 const { buildBaseConfig, REQUIRED_ENV_VARS } = require('./default');
 
@@ -29,14 +31,8 @@ function merge(base, override) {
 
 const baseConfig = buildBaseConfig();
 
-let overrides = {};
-try {
-    overrides = require(`./${environment.name}`);
-} catch (error) {
-    if (error.code !== 'MODULE_NOT_FOUND') {
-        throw error;
-    }
-}
+const overrideFilePath = path.resolve(__dirname, `${environment.name}.js`);
+const overrides = fs.existsSync(overrideFilePath) ? require(overrideFilePath) : {};
 
 const config = merge(baseConfig, overrides);
 config.environment = environment;

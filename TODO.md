@@ -8,13 +8,13 @@
 
 ## Medium Priority
 
-- [ ] Treat non-zero SSH command exit codes as failures consistently across command handlers.
-- [ ] Register commands for newly joined allowed guilds on `guildCreate`.
+- [x] Treat non-zero SSH command exit codes as failures consistently across command handlers.
+- [x] Register commands for newly joined allowed guilds on `guildCreate`.
 - [ ] Enforce strict port validation (`1-65535`, integer only) in config parsing.
 
 ## Low Priority
 
-- [ ] Tighten `MODULE_NOT_FOUND` handling in `config/index.js` so only missing env override file is suppressed.
+- [x] Tighten `MODULE_NOT_FOUND` handling in `config/index.js` so only missing env override file is suppressed.
 - [ ] Use deterministic installs (`npm ci`) in CI and Docker build.
 
 ## Validation / Test Gaps

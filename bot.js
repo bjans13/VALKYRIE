@@ -15,7 +15,7 @@ const fs = require('fs');
 const { setTimeout: delay } = require('timers/promises');
 const config = require('./config');
 const logger = require('./utils/logger');
-const { withSSHConnection, runSSHCommand } = require('./utils/sshHandler');
+const { withSSHConnection, runSSHCommand, execSSHCommand } = require('./utils/sshHandler');
 
 validateFilesystemPrerequisites([
     { name: 'Terraria', keyPath: config.terraria.privateKeyPath },
@@ -464,9 +464,9 @@ registerCommand({
         await respond(interaction, 'Fetching list of currently connected players...');
         try {
             const stdout = await withSSHConnection(config.terraria, async (client) => {
-                await client.execCommand('screen -S terraria -p 0 -X stuff "playing\\n"');
+                await execSSHCommand(client, 'screen -S terraria -p 0 -X stuff "playing\\n"');
                 await delay(5000);
-                const result = await client.execCommand('cat 1449/Linux/screenlog.0');
+                const result = await execSSHCommand(client, 'cat 1449/Linux/screenlog.0');
                 return result.stdout;
             });
 
@@ -509,7 +509,8 @@ registerCommand({
         await respond(interaction, 'Sending announcement to players...');
         try {
             await withSSHConnection(config.terraria, async (client) => {
-                await client.execCommand(
+                await execSSHCommand(
+                    client,
                     `screen -S terraria -p 0 -X stuff ${escapedScreenPayload}`
                 );
             });
@@ -546,7 +547,7 @@ registerCommand({
     handler: async (interaction) => {
         await respond(interaction, 'Checking Minecraft server status...');
         try {
-            const result = await runSSHCommand(config.minecraft, 'sudo systemctl is-active minecraft');
+            const result = await runSSHCommand(config.minecraft, 'sudo systemctl show -p ActiveState --value minecraft');
             const status = result.stdout.trim() || result.stderr.trim();
             await respond(interaction, `Minecraft server status: ${status}`);
         } catch (error) {
@@ -582,7 +583,8 @@ registerCommand({
         await respond(interaction, 'Starting Terraria server...');
         try {
             await withSSHConnection(config.terraria, async (client) => {
-                await client.execCommand(
+                await execSSHCommand(
+                    client,
                     'screen -L -Logfile screenlog.0 -dmS terraria ./TerrariaServer.bin.x86_64 -config ./serverconfig.txt',
                     { cwd: '1449/Linux' }
                 );
@@ -618,7 +620,7 @@ registerCommand({
     handler: async (interaction) => {
         await respond(interaction, 'Stopping Terraria server...');
         try {
-            await withSSHConnection(config.terraria, (client) => client.execCommand('screen -S terraria -X quit'));
+            await withSSHConnection(config.terraria, (client) => execSSHCommand(client, 'screen -S terraria -X quit'));
             await respond(interaction, 'Terraria server stopped.');
         } catch (error) {
             logger.error('Failed to stop Terraria server', { error });
@@ -639,7 +641,7 @@ registerCommand({
         setTimeout(async () => {
             try {
                 await respond(interaction, 'Stopping Terraria server now...');
-                await withSSHConnection(config.terraria, (client) => client.execCommand('screen -S terraria -X quit'));
+                await withSSHConnection(config.terraria, (client) => execSSHCommand(client, 'screen -S terraria -X quit'));
                 await respond(interaction, 'Terraria server stopped.');
             } catch (error) {
                 logger.error('Failed to stop Terraria server', { error });
@@ -660,8 +662,9 @@ registerCommand({
         await respond(interaction, 'Restarting Terraria server...');
         try {
             await withSSHConnection(config.terraria, async (client) => {
-                await client.execCommand('screen -S terraria -X quit');
-                await client.execCommand(
+                await execSSHCommand(client, 'screen -S terraria -X quit');
+                await execSSHCommand(
+                    client,
                     'screen -L -Logfile screenlog.0 -dmS terraria ./TerrariaServer.bin.x86_64 -config ./serverconfig.txt',
                     { cwd: '1449/Linux' }
                 );
@@ -699,9 +702,9 @@ registerCommand({
         try {
             const result = await runSSHCommand(
                 config.terraria,
-                'ps -eo pid,etime,cmd | grep TerrariaServer | grep -v grep'
+                "ps -eo etime,cmd | awk '/TerrariaServer/ && !/awk/ { print $1; exit }'"
             );
-            const uptime = result.stdout ? result.stdout.split(/\s+/)[1] : 'Unable to determine uptime.';
+            const uptime = result.stdout.trim() || 'Unable to determine uptime.';
             await respond(interaction, `Server uptime: ${uptime}`);
         } catch (error) {
             logger.error('Failed to fetch server uptime', { error });
@@ -908,6 +911,7 @@ registerCommand({
             commandResult = await runSSHCommand(config.minecraft, 'sudo /minecraft/update.sh', {
                 onStdout: handleStdoutChunk,
                 onStderr: handleStderrChunk,
+                allowNonZeroExitCode: true,
             });
         } catch (error) {
             if (stdoutBuffer) {
@@ -1152,13 +1156,30 @@ registerCommand({
     handler: respondWithServerHelp,
 });
 
-async function registerSlashCommands(clientInstance) {
-    const rest = new REST({ version: '10' }).setToken(config.discordToken);
-
-    const body = commandDefinitions
+function buildCommandRegistrationBody() {
+    return commandDefinitions
         .map((command) => command.builder)
         .filter(Boolean)
         .map((builder) => builder.toJSON());
+}
+
+async function registerCommandsForGuild(clientInstance, guild, options = {}) {
+    if (!clientInstance.user?.id) {
+        throw new Error('Client user is not ready for command registration.');
+    }
+
+    const restClient = options.restClient ?? new REST({ version: '10' }).setToken(config.discordToken);
+    const body = options.body ?? buildCommandRegistrationBody();
+
+    await restClient.put(
+        Routes.applicationGuildCommands(clientInstance.user.id, guild.id),
+        { body }
+    );
+}
+
+async function registerSlashCommands(clientInstance) {
+    const rest = new REST({ version: '10' }).setToken(config.discordToken);
+    const body = buildCommandRegistrationBody();
 
     const guilds = clientInstance.guilds.cache;
     for (const guild of guilds.values()) {
@@ -1173,10 +1194,7 @@ async function registerSlashCommands(clientInstance) {
         }
 
         try {
-            await rest.put(
-                Routes.applicationGuildCommands(clientInstance.user.id, guild.id),
-                { body }
-            );
+            await registerCommandsForGuild(clientInstance, guild, { restClient: rest, body });
         } catch (error) {
             logger.error(`Failed to register commands for guild ${guild.id}`, { error });
         }
@@ -1184,16 +1202,22 @@ async function registerSlashCommands(clientInstance) {
 }
 
 client.on('guildCreate', async (guild) => {
-    if (isAllowedGuild(guild.id)) {
+    if (!isAllowedGuild(guild.id)) {
+        await reportUnauthorizedGuild(
+            client,
+            guild.id,
+            'Joined unauthorized guild',
+            guild.name ?? 'Unknown'
+        );
         return;
     }
 
-    await reportUnauthorizedGuild(
-        client,
-        guild.id,
-        'Joined unauthorized guild',
-        guild.name ?? 'Unknown'
-    );
+    try {
+        await registerCommandsForGuild(client, guild);
+        logger.info(`Registered commands for newly joined allowed guild ${guild.id}`);
+    } catch (error) {
+        logger.error(`Failed to register commands for newly joined allowed guild ${guild.id}`, { error });
+    }
 });
 
 client.on('interactionCreate', async (interaction) => {
